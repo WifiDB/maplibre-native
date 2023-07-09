@@ -2,21 +2,33 @@ name: linux-ci
 
 on:
   workflow_dispatch:
-  pull_request:
+  push:
     branches:
       - main
     paths:
       - "src/**"
+      - "test/**"
+      - "render-test/**"
+      - "expression-test/**"
       - "include/**"
       - ".github/workflows/linux-ci.yml"
       - "vendor/**"
       - "CMakeLists.txt"
       - metrics/linux-gcc8-release-style.json
 
-# https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
-permissions:
-  id-token: write # This is required for requesting the JWT (AWS)
-  contents: read  # This is required for actions/checkout (AWS)
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "test/**"
+      - "render-test/**"
+      - "expression-test/**"
+      - "include/**"
+      - ".github/workflows/linux-ci.yml"
+      - "vendor/**"
+      - "CMakeLists.txt"
+      - metrics/linux-gcc8-release-style.json
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -48,13 +60,14 @@ jobs:
             libuv1-dev \
             libjpeg-dev \
             libpng-dev \
-            libglfw3-dev
+            libglfw3-dev \
+            libwebp-dev
 
-      - name: Build Maplibre GL Core
+      - name: Build MapLibre Native Core
         run: |
           cmake --version
           cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Debug -DMLN_WITH_CLANG_TIDY=ON -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DMLN_WITH_COVERAGE=ON
-          cmake --build build --target mbgl-core mbgl-test-runner mbgl-render-test-runner
+          cmake --build build --target mbgl-core mbgl-test-runner mbgl-render-test-runner mbgl-expression-test
 
       - name: Archive mbgl-test-runner
         uses: actions/upload-artifact@v3
@@ -69,7 +82,14 @@ jobs:
           name: mbgl-render-test-runner
           path: build/mbgl-render-test-runner
           retention-days: 1
-  
+
+      - name: Archive mbgl-expression-test
+        uses: actions/upload-artifact@v3
+        with:
+          name: mbgl-expression-test
+          path: build/expression-test/mbgl-expression-test
+          retention-days: 1
+
   test:
     needs: build
     runs-on: ubuntu-22.04
@@ -88,7 +108,7 @@ jobs:
           name: mbgl-test-runner
 
       - run: chmod +x ./mbgl-test-runner
-      
+
       - name: Install npm packages and run test server in background
         run: |
           npm install
@@ -96,6 +116,21 @@ jobs:
 
       - name: Run C++ tests
         run: xvfb-run -a ./mbgl-test-runner
+
+  expression-test:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: Download mbgl-expression-test
+        uses: actions/download-artifact@v3
+        with:
+          name: mbgl-expression-test
+
+      - run: chmod +x ./mbgl-expression-test
+
+      - name: Run expression test
+        run: ./mbgl-expression-test
 
   render-test:
     needs: build
@@ -113,7 +148,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: mbgl-render-test-runner
-      
+
       - run: chmod +x ./mbgl-render-test-runner
 
       - name: Run render test
@@ -121,27 +156,63 @@ jobs:
         id: render_test
         run: xvfb-run -a ./mbgl-render-test-runner --manifestPath=metrics/linux-gcc8-release-style.json
 
-      - name: Configure AWS Credentials
-        if: ${{ steps.render_test.outcome == 'failure' }}
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-region: us-west-2
-          role-to-assume: ${{ vars.OIDC_AWS_ROLE_TO_ASSUME }}
-          role-session-name: ${{ github.run_id	}}
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      
-      - name: Upload render test results to S3
-        if: ${{ steps.render_test.outcome == 'failure' }}
-        id: upload_render_test_results
+      - name: Save PR number
+        env:
+          PR_NUMBER: ${{ github.event.number }}
         run: |
-          aws s3 cp metrics/linux-gcc8-release-style.html \
-            s3://maplibre-native-test-artifacts/${{ github.run_id	}}-linux-gcc8-release-style.html \
-            --expires "$(date -d '+30 days' --utc +'%Y-%m-%dT%H:%M:%SZ')
+          echo $PR_NUMBER > ./pr_number
 
-      - name: Make comment with test results
-        if: ${{ steps.upload_render_test_results.outcome == 'success' }}
-        uses: thollander/actions-comment-pull-request@v2
+      - name: Upload render test result
+        uses: actions/upload-artifact@v3
         with:
-          message: |
-            Test results at https://maplibre-native-test-artifacts.s3.eu-central-1.amazonaws.com/${{ github.run_id }}-linux-gcc8-release-style.html
+          name: render-test-result
+          path: |
+            metrics/linux-gcc8-release-style.html
+            ./pr_number
+
+  coverage:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcurl4-openssl-dev \
+            libuv1-dev \
+            libjpeg-dev \
+            libpng-dev \
+            libwebp-dev \
+            libglfw3-dev \
+            libsqlite3-dev \
+            xserver-xorg-video-dummy \
+            xinit
+
+      - name: Cache Bazel
+        uses: actions/cache@v3
+        with:
+          key: ${{ runner.os }}-bazel-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE', 'WORKSPACE.bazel', 'MODULE.bazel') }}
+          restore-keys: |
+            ${{ runner.os }}-bazel-
+          path: ~/.cache/bazel
+
+      - name: Start server
+        run: |
+          npm install --ignore-scripts
+          node test/storage/server.js &
+
+      - name: Generate coverage report
+        run: |
+          bazel coverage --test_output=all --combined_report=lcov --nobuild_runfile_links --local_test_jobs=1 --instrumentation_filter="//:mbgl-core" //test:core //render-test:render-test --//:maplibre_platform=linux --run_under=//platform/linux:startxwrapper
+          echo coverage_report=$(bazel info output_path)/_coverage/_coverage_report.dat >> $GITHUB_ENV
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v3
+        with:
+          files: ${{ env.coverage_report }}
+          fail_ci_if_error: true
+          verbose: true
