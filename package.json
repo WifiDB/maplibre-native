@@ -1,6 +1,6 @@
 {
   "name": "@acalcutt/maplibre-gl-native-test",
-  "version": "5.2.1-pre.2",
+  "version": "5.2.1-pre.3",
   "description": "Renders map tiles with Maplibre GL",
   "keywords": [
     "maplibre",
