@@ -235,7 +235,7 @@ jobs:
           cmake --build build
 
       - name: Publish X64 Release to Github
-        if: github.ref == 'refs/heads/main' && runner.arch == 'x86_64'
+        if: runner.arch == 'x86_64'
         env:
           PUBLISH: true
           BUILDTYPE: RelWithDebInfo
@@ -244,7 +244,7 @@ jobs:
           ./platform/node/scripts/publish.sh
 
       - name: Publish ARM Release to Github
-        if: github.ref == 'refs/heads/main' && runner.arch == 'arm64'
+        if: runner.arch == 'arm64'
         env:
           PUBLISH: true
           BUILDTYPE: RelWithDebInfo
