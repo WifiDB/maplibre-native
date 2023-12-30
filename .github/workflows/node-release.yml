@@ -25,7 +25,7 @@ jobs:
       - name: Check if version changed
         id: check
         run: |
-          latestNpmPackageVersion=$( npm view @maplibre/maplibre-gl-native versions --json | jq '.[-1]' -r )
+          latestNpmPackageVersion=$( npm view @acalcutt/maplibre-gl-native-test versions --json | jq '.[-1]' -r )
           currentVersion=$( node -e "console.log(require('./package.json').version)" )
           if [ "$latestNpmPackageVersion" == "$currentVersion" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
