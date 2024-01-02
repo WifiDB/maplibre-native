@@ -26,7 +26,7 @@ jobs:
         id: check
         run: |
           currentVersion="$( node -e "console.log(require('./package.json').version)" )"
-          isPublished="$( npm view @acalcutt/maplibre-gl-native versions --json | jq -c --arg cv '$currentVersion' 'any(. == $cv)' )"
+          isPublished="$( npm view @acalcutt/maplibre-gl-native-test versions --json | jq -c --arg cv '$currentVersion' 'any(. == $cv)' )"
           if [ "$isPublished" == "true" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
