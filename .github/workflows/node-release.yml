@@ -7,7 +7,7 @@ on:
 
 jobs:
   release-check:
-    name: Check if version changed
+    name: Check if version is published
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -22,7 +22,7 @@ jobs:
         with:
           node-version-file: '.nvmrc'
 
-      - name: Check if version changed
+      - name: Check if version is published
         id: check
         run: |
           currentVersion="$( node -e "console.log(require('./package.json').version)" )"
