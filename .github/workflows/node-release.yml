@@ -26,17 +26,18 @@ jobs:
         id: check
         run: |
           currentVersion="$( node -e "console.log(require('./package.json').version)" )"
-          isPublished="$( npm view @acalcutt/maplibre-gl-native-test versions --json | jq -c --arg cv $currentVersion 'any(. == $cv)' )"
-          if [ "$isPublished" == "true" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
           echo "currentVersion: $currentVersion"
+          isPublished="$( npm view @acalcutt/maplibre-gl-native-test versions --json | jq -c --arg cv $currentVersion 'any(. == $cv)' )"
           echo "isPublished: $isPublished"
-          echo "$GITHUB_OUTPUT"
+          if [ "$isPublished" == "true" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "publish=false"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "publish=true"
+          fi
     outputs:
-      publish: ${{ steps.check.outputs.changed }}
+      publish: ${{ steps.check.outputs.publish }}
 
   publish_binaries:
     needs: release-check
