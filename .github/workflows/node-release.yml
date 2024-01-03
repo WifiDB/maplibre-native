@@ -35,7 +35,7 @@ jobs:
 
   release-github:
     name: Create Github Release with Notes
-    needs: release-github
+    needs: release-check
     if: ${{ needs.release-check.outputs.published == 'false' }}
     runs-on: ubuntu-latest
     defaults:
