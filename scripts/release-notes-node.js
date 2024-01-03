@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import * as fs from 'fs';
-import semver from 'semver';
+const fs = require('fs');
+const semver = require('semver')
 
 const changelogPath = 'platform/node/CHANGELOG.md';
 const changelog = fs.readFileSync(changelogPath, 'utf8');
