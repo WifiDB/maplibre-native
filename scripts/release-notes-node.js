@@ -31,10 +31,6 @@ while (match = regex.exec(changelog)) {
 const latest = releaseNotes[0];
 const previous = releaseNotes[1];
 
-console.log(latest.version);
-console.log(previous.version);
-
-
 //  Print the release notes template.
 
 const templatedReleaseNotes = `https://github.com/maplibre/maplibre-native/
