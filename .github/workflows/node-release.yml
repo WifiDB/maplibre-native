@@ -33,7 +33,7 @@ jobs:
     outputs:
       published: ${{ steps.check.outputs.published }}
 
-  github_release:
+  release-github:
     name: Create Github Release with Notes
     needs: release-github
     if: ${{ needs.release-check.outputs.published == 'false' }}
