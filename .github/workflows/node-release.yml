@@ -294,7 +294,7 @@ jobs:
       - name: Update Release Notes (prerelease)
         id: create_prerelease
         if: ${{ steps.prepare_release.outputs.release_type == 'prerelease' }}
-        uses: actions/create-release@v1
+        uses: ncipollo/release-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
