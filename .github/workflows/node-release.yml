@@ -61,6 +61,7 @@ jobs:
       - name: ls
         run: |
          ls -l
+         ls -l scripts
 
       - name: Prepare release
         id: prepare_release
