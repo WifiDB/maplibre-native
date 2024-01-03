@@ -33,76 +33,8 @@ jobs:
     outputs:
       published: ${{ steps.check.outputs.published }}
 
-  release-github:
-    name: Create Github Release with Notes
-    needs: release-check
-    if: ${{ needs.release-check.outputs.published == 'false' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Use Node.js from nvmrc
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: '.nvmrc'
-
-      - name: Get version
-        id: package-version
-        uses: martinbeentjes/npm-get-version-action@v1.3.1
-
-      - name: npm ci
-        run: npm ci --ignore-scripts
-
-      - name: Prepare release
-        id: prepare_release
-        run: |
-          RELEASE_TYPE="$(node -e "console.log(require('semver').prerelease('${{ steps.package-version.outputs.current-version }}') ? 'prerelease' : 'regular')")"
-          echo "release_type=$RELEASE_TYPE" >> $GITHUB_OUTPUT
-
-      - name: Build Release Notes
-        id: release_notes
-        if: ${{ steps.prepare_release.outputs.release_type == 'regular' }}
-        run: |
-          RELEASE_NOTES_PATH="${PWD}/release_notes.txt"
-          chmod +x ./scripts/release-notes-node.js
-          ./scripts/release-notes-node.js > ${RELEASE_NOTES_PATH}
-          echo "release_notes=${RELEASE_NOTES_PATH}" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release (regular)
-        id: create_regular_release
-        if: ${{ steps.prepare_release.outputs.release_type == 'regular' }}
-        uses: ncipollo/release-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag: node_v${{ steps.package-version.outputs.current-version }}
-          name: node_v${{ steps.package-version.outputs.current-version }}
-          bodyFile: ${{ steps.release_notes.outputs.release_notes }}
-          allowUpdates: true
-          draft: false
-          prerelease: false
-
-      - name: Create GitHub Release (prerelease)
-        id: create_prerelease
-        if: ${{ steps.prepare_release.outputs.release_type == 'prerelease' }}
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.NODE_PRE_GYP_GITHUB_TOKEN }}
-        with:
-          tag: node_v${{ steps.package-version.outputs.current-version }}
-          name: node_v${{ steps.package-version.outputs.current-version }}
-          draft: false
-          prerelease: true
-
   publish_binaries:
-    needs: [release-check, release-github]
+    needs: release-check
     if: ${{ needs.release-check.outputs.published == 'false' }}
     runs-on: ${{ matrix.runs-on }}
     strategy:
@@ -305,10 +237,10 @@ jobs:
   publish_npm:
     runs-on: ubuntu-latest
     needs: publish_binaries
-
+    permissions:
+      contents: write
     defaults:
       run:
-        working-directory: ./
         shell: bash
 
     steps:
@@ -333,6 +265,43 @@ jobs:
         run: |
           RELEASE_TYPE="$(node -e "console.log(require('semver').prerelease('${{ steps.package-version.outputs.current-version }}') ? 'prerelease' : 'regular')")"
           echo "release_type=$RELEASE_TYPE" >> $GITHUB_OUTPUT
+
+      - name: Build Release Notes
+        id: release_notes
+        if: ${{ steps.prepare_release.outputs.release_type == 'regular' }}
+        run: |
+          RELEASE_NOTES_PATH="${PWD}/release_notes.txt"
+          chmod +x ./scripts/release-notes-node.js
+          ./scripts/release-notes-node.js > ${RELEASE_NOTES_PATH}
+          echo "release_notes=${RELEASE_NOTES_PATH}" >> $GITHUB_OUTPUT
+
+      - name: Update Release Notes (release)
+        id: create_regular_release
+        if: ${{ steps.prepare_release.outputs.release_type == 'regular' }}
+        uses: ncipollo/release-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag: node_v${{ steps.package-version.outputs.current-version }}
+          name: node_v${{ steps.package-version.outputs.current-version }}
+          bodyFile: ${{ steps.release_notes.outputs.release_notes }}
+          allowUpdates: true
+          draft: false
+          prerelease: false
+
+      - name: Update Release Notes (prerelease)
+        id: create_prerelease
+        if: ${{ steps.prepare_release.outputs.release_type == 'prerelease' }}
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag: node_v${{ steps.package-version.outputs.current-version }}
+          name: node_v${{ steps.package-version.outputs.current-version }}
+          bodyFile: ${{ steps.release_notes.outputs.release_notes }}
+          allowUpdates: true
+          draft: false
+          prerelease: true
 
       - name: Publish to NPM (release)
         if: ${{ steps.prepare_release.outputs.release_type == 'regular' }}
