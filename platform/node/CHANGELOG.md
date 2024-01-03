@@ -7,6 +7,14 @@
 ### 🐞 Bug fixes
 - *...Add new stuff here...*
 
+## 5.2.8-pre.0
+
+### ✨ New features
+* test 5.2.8-pre.0
+
+### 🐞 Bug fixes
+* test 5.2.8-pre.0
+
 ## 5.2.7-pre.2
 
 ### ✨ New features
