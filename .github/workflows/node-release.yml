@@ -58,11 +58,6 @@ jobs:
       - name: npm ci
         run: npm ci --ignore-scripts
 
-      - name: ls
-        run: |
-         ls -l
-         ls -l scripts
-
       - name: Prepare release
         id: prepare_release
         run: |
@@ -77,6 +72,14 @@ jobs:
           chmod +x ./scripts/release-notes-node.js
           ./scripts/release-notes-node.js > ${RELEASE_NOTES_PATH}
           echo "release_notes=${RELEASE_NOTES_PATH}" >> $GITHUB_OUTPUT
+
+      - name: ls
+        run: |
+         ls -l
+         RELEASE_NOTES_PATH="${PWD}/release_notes.txt"
+         echo $RELEASE_NOTES_PATH
+         cat $RELEASE_NOTES_PATH
+
 
       - name: Create GitHub Release (regular)
         id: create_regular_release
