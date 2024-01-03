@@ -74,6 +74,7 @@ jobs:
         if: ${{ steps.prepare_release.outputs.release_type == 'regular' }}
         run: |
           RELEASE_NOTES_PATH="${PWD}/release_notes.txt"
+          chmod +x ./scripts/release-notes-node.js
           ./scripts/release-notes-node.js > ${RELEASE_NOTES_PATH}
           echo "release_notes=${RELEASE_NOTES_PATH}" >> $GITHUB_OUTPUT
 
