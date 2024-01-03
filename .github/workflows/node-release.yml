@@ -58,9 +58,9 @@ jobs:
       - name: npm ci
         run: npm ci --ignore-scripts
 
-      - name: Pack
+      - name: ls
         run: |
-          npm pack --dry-run
+         ls -l
 
       - name: Prepare release
         id: prepare_release
