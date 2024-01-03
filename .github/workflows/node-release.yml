@@ -270,7 +270,6 @@ jobs:
 
       - name: Build Release Notes
         id: release_notes
-        if: ${{ steps.prepare_release.outputs.release_type == 'regular' }}
         run: |
           RELEASE_NOTES_PATH="${PWD}/release_notes.txt"
           node ./scripts/release-notes-node.js > ${RELEASE_NOTES_PATH}
