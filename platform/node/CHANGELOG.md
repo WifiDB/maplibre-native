@@ -4,6 +4,10 @@
 
 * ...Add new stuff here...*
 
+## 5.2.9
+
+* test 5.2.9
+
 ## 5.2.9-pre.3
 
 * test 5.2.9-pre.3
