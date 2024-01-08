@@ -2,7 +2,7 @@ name: node-release
 
 on:
   push:
-    branches: [opengl-2]
+    branches: [opengl-2-pr3-1_test]
   workflow_dispatch:
 
 jobs:
@@ -45,12 +45,8 @@ jobs:
         include:
           - runs-on: ubuntu-22.04
             arch: x86_64
-          - runs-on: [self-hosted, linux, ARM64]
-            arch: arm64
           - runs-on: macos-12
             arch: x86_64
-          - runs-on: [self-hosted, macOS, ARM64]
-            arch: arm64
           - runs-on: windows-2022
             arch: x86_64
     continue-on-error: true
