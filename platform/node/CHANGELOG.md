@@ -4,6 +4,11 @@
 * Make Node Map object options "request" property optional by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/904
 * Compile Node targets without -std=c++11 option by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/926
 
+## v5.3.0-pre.0
+
+* Make Node Map object options "request" property optional by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/904
+* Compile Node targets without -std=c++11 option by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/926
+
 ## 5.2.0
 * Adjust Typings for Node Platform by @etnav in https://github.com/maplibre/maplibre-native/pull/871
 * Node platform improvements (added setSize and a new render call without render options object) by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/891
