@@ -1,6 +1,10 @@
 
 ## main
 
+## 5.3.1-pre.0
+* Add WebP decoding support to Linux and Windows (maplibre#1314)
+* Add slice and index-of expression (maplibre#2023)
+
 ## 5.3.0
 
 * [Note] This is a OpenGL-2 release. It does not include metal support.
