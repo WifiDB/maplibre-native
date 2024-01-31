@@ -1,0 +1,36 @@
+FROM ubuntu:jammy
+
+RUN set -ex; \
+    export DEBIAN_FRONTEND=noninteractive; \
+    apt-get -qq update; \
+    apt-get -y --no-install-recommends install \
+      ca-certificates \
+      wget \
+      ccache \
+      cmake \
+      ninja-build \
+      pkg-config \
+      xvfb \
+      libcurl4-openssl-dev \
+      libglfw3-dev \
+      libuv1-dev \
+      g++-12 \
+      libjpeg-dev \
+      libpng-dev \
+      libwebp-dev \
+      libc++-9-dev \
+      libc++abi-9-dev;
+
+RUN mkdir -p /etc/apt/keyrings; \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list; \
+    apt-get -qq update; \
+    apt-get install -y nodejs; \
+    npm i -g npm@latest;
+
+VOLUME /data
+
+RUN mkdir -p /usr/src/app
+COPY /platform/node/scripts/docker_build_entrypoint.sh /usr/src/app/docker_build_entrypoint.sh
+ENTRYPOINT ["/usr/src/app/docker_build_entrypoint.sh"]
+RUN ["chmod", "+x", "/usr/src/app/docker_build_entrypoint.sh"]
