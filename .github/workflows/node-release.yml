@@ -299,14 +299,13 @@ jobs:
 
       - name: Update Release Notes
         id: update_release_notes
-        working-directory: platform/node
         uses: ncipollo/release-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag: node-v${{ steps.package-version.outputs.current-version }}
           name: node-v${{ steps.package-version.outputs.current-version }}
-          bodyFile: changelog_for_version.md
+          bodyFile: platform/node/changelog_for_version.md
           allowUpdates: true
           draft: false
           prerelease: ${{ steps.prepare_release.outputs.prerelease }}
