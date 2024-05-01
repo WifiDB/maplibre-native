@@ -271,6 +271,7 @@ jobs:
           node-version-file: '.nvmrc'
 
       - name: Get version
+        working-directory: platform/node
         id: package-version
         uses: martinbeentjes/npm-get-version-action@v1.3.1
 
@@ -297,6 +298,7 @@ jobs:
 
       - name: Update Release Notes
         id: update_release_notes
+        working-directory: platform/node
         uses: ncipollo/release-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
