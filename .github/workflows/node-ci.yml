@@ -4,9 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - main
-      - topic/drawable
-      - node-*.*.x
+      - move-node-test
     tags:
       - "node-*"
     paths:
