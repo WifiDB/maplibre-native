@@ -3,6 +3,8 @@
 set -e
 set -o pipefail
 
+ls -l
+
 PACKAGE_JSON_VERSION=`node -e "console.log(require('./package.json').version)"`
 
 if [[ "${CIRCLE_TAG}" == "node-v${PACKAGE_JSON_VERSION}" ]] || [[ "${PUBLISH:-}" == true ]]; then
@@ -13,11 +15,11 @@ if [[ "${CIRCLE_TAG}" == "node-v${PACKAGE_JSON_VERSION}" ]] || [[ "${PUBLISH:-}"
         rm -rf build/stage
 
         if [[ "${BUILDTYPE}" == "RelWithDebInfo" ]]; then
-            ../node_modules/.bin/node-pre-gyp package --target="${TARGET}" $@
-            ../node_modules/.bin/node-pre-gyp-github publish --release
+            ./node_modules/.bin/node-pre-gyp package --target="${TARGET}" $@
+            ./node_modules/.bin/node-pre-gyp-github publish --release
         elif [[ "${BUILDTYPE}" == "Debug" ]]; then
-            ../node_modules/.bin/node-pre-gyp package --target="${TARGET}" --debug $@
-            ../node_modules/.bin/node-pre-gyp-github publish --release
+            ./node_modules/.bin/node-pre-gyp package --target="${TARGET}" --debug $@
+            ./node_modules/.bin/node-pre-gyp-github publish --release
         else
             echo "error: must provide either Debug or RelWithDebInfo for BUILDTYPE"
             exit 1
