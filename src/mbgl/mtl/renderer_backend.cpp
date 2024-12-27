@@ -1,4 +1,4 @@
-#include <mbgl/mtl/renderer_backend.hpp>
+#include "mbgl/mtl/renderer_backend.hpp"
 
 #include <mbgl/gfx/backend_scope.hpp>
 #include <mbgl/gfx/shader_registry.hpp>
@@ -40,44 +40,93 @@
 namespace mbgl {
 namespace mtl {
 
+     // Helper function to release a Metal object
+    template <typename T>
+    void safeRelease(T object, const char* name) {
+        if (object) {
+            [object release];
+            MBGL_DEBUG("RendererBackend: Released: %s", name);
+        }
+    }
+    
+    // Helper function to track the creation of a metal object.
+    template <typename T>
+    T safeCreate(T object, const char* name){
+        if(!object){
+            MBGL_ERROR("RendererBackend: Failed to create: %s", name);
+        } else {
+          MBGL_DEBUG("RendererBackend: Created: %s", name);
+        }
+        return object;
+    }
+
 RendererBackend::RendererBackend(const gfx::ContextMode contextMode_)
     : gfx::RendererBackend(contextMode_),
-      device(NS::TransferPtr(MTL::CreateSystemDefaultDevice())),
-      commandQueue(NS::TransferPtr(device->newCommandQueue())) {
-    assert(device);
-    assert(commandQueue);
+      device(safeCreate(NS::TransferPtr(MTL::CreateSystemDefaultDevice()), "MTLDevice")),
+      commandQueue(safeCreate(device ? NS::TransferPtr(device->newCommandQueue()) : nullptr, "MTLCommandQueue")) {
+    MBGL_DEBUG("RendererBackend::RendererBackend()");
+    if(!device) {
+      MBGL_ERROR("RendererBackend::RendererBackend - MTLDevice creation failed");
+        return;
+    }
+    if(!commandQueue){
+        MBGL_ERROR("RendererBackend::RendererBackend - MTLCommandQueue creation failed");
+      safeRelease(device, "MTLDevice");
+        device = nullptr;
+      return;
+    }
 #if TARGET_OS_SIMULATOR
     baseVertexInstanceDrawingSupported = true;
 #else
     baseVertexInstanceDrawingSupported = device->supportsFamily(MTL::GPUFamilyApple3);
 #endif
+      MBGL_DEBUG("RendererBackend::RendererBackend() - baseVertexInstanceDrawingSupported: %d", baseVertexInstanceDrawingSupported);
 }
 
-RendererBackend::~RendererBackend() = default;
+RendererBackend::~RendererBackend() {
+    MBGL_DEBUG("RendererBackend::~RendererBackend()");
+    safeRelease(commandQueue, "MTLCommandQueue");
+    safeRelease(device, "MTLDevice");
+}
 
 std::unique_ptr<gfx::Context> RendererBackend::createContext() {
+    MBGL_DEBUG("RendererBackend::createContext()");
     return std::make_unique<mtl::Context>(*this);
 }
 
 PremultipliedImage RendererBackend::readFramebuffer(const Size& size) {
+    MBGL_DEBUG("RendererBackend::readFramebuffer()");
     return PremultipliedImage(size);
 }
 
-void RendererBackend::assumeFramebufferBinding(const mtl::FramebufferID fbo) {}
+void RendererBackend::assumeFramebufferBinding(const mtl::FramebufferID fbo) {
+    MBGL_DEBUG("RendererBackend::assumeFramebufferBinding()");
+}
 
-void RendererBackend::assumeViewport(int32_t x, int32_t y, const Size& size) {}
+void RendererBackend::assumeViewport(int32_t x, int32_t y, const Size& size) {
+    MBGL_DEBUG("RendererBackend::assumeViewport()");
+}
 
-void RendererBackend::assumeScissorTest(bool enabled) {}
+void RendererBackend::assumeScissorTest(bool enabled) {
+    MBGL_DEBUG("RendererBackend::assumeScissorTest()");
+}
 
 bool RendererBackend::implicitFramebufferBound() {
+     MBGL_DEBUG("RendererBackend::implicitFramebufferBound()");
     return false;
 }
 
-void RendererBackend::setFramebufferBinding(const mtl::FramebufferID fbo) {}
+void RendererBackend::setFramebufferBinding(const mtl::FramebufferID fbo) {
+    MBGL_DEBUG("RendererBackend::setFramebufferBinding()");
+}
 
-void RendererBackend::setViewport(int32_t x, int32_t y, const Size& size) {}
+void RendererBackend::setViewport(int32_t x, int32_t y, const Size& size) {
+    MBGL_DEBUG("RendererBackend::setViewport()");
+}
 
-void RendererBackend::setScissorTest(bool enabled) {}
+void RendererBackend::setScissorTest(bool enabled) {
+     MBGL_DEBUG("RendererBackend::setScissorTest()");
+}
 
 /// @brief Register a list of types with a shader registry instance
 /// @tparam ...ShaderID Pack of BuiltIn:: shader IDs
@@ -97,15 +146,18 @@ void registerTypes(gfx::ShaderRegistry& registry, const ProgramParameters& progr
             using ShaderClass = shaders::ShaderSource<ShaderID, gfx::Backend::Type::Metal>;
             auto group = std::make_shared<ShaderGroup<ShaderID>>(programParameters);
             if (!registry.registerShaderGroup(std::move(group), ShaderClass::name)) {
-                assert(!"duplicate shader group");
-                throw std::runtime_error("Failed to register "s + ShaderClass::name + " with shader registry!");
+                MBGL_ERROR("RendererBackend::registerTypes - Failed to register shader group: %s", ShaderClass::name.c_str());
+                return false;
             }
+          MBGL_DEBUG("RendererBackend::registerTypes - Registered shader group: %s", ShaderClass::name.c_str());
+          return true;
         }(),
         ...);
 }
 
 void RendererBackend::initShaders(gfx::ShaderRegistry& shaders, const ProgramParameters& programParameters) {
-    registerTypes<shaders::BuiltIn::BackgroundShader,
+    MBGL_DEBUG("RendererBackend::initShaders()");
+    if(!registerTypes<shaders::BuiltIn::BackgroundShader,
                   shaders::BuiltIn::BackgroundPatternShader,
                   shaders::BuiltIn::CircleShader,
                   shaders::BuiltIn::ClippingMaskProgram,
@@ -132,7 +184,10 @@ void RendererBackend::initShaders(gfx::ShaderRegistry& shaders, const ProgramPar
                   shaders::BuiltIn::SymbolIconShader,
                   shaders::BuiltIn::SymbolSDFIconShader,
                   shaders::BuiltIn::SymbolTextAndIconShader,
-                  shaders::BuiltIn::WideVectorShader>(shaders, programParameters);
+                  shaders::BuiltIn::WideVectorShader>(shaders, programParameters)){
+          MBGL_ERROR("RendererBackend::initShaders - Failed to register one or more shader groups");
+          return;
+        }
 }
 
 } // namespace mtl
