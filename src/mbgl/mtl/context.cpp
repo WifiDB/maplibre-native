@@ -33,7 +33,7 @@
 
 namespace mbgl {
 namespace mtl {
-    
+   
 // Helper function to release a Metal object
 template <typename T>
 void safeRelease(T object, const char* name) {
@@ -46,12 +46,12 @@ void safeRelease(T object, const char* name) {
 // Helper function to track the creation of a metal object.
 template <typename T>
 T safeCreate(T object, const char* name){
-    if(!object){
-        MBGL_ERROR("Failed to create: %s", name);
-    } else {
-        MBGL_DEBUG("Created: %s", name);
-    }
-    return object;
+   if(!object){
+       MBGL_ERROR("Failed to create: %s", name);
+   } else {
+       MBGL_DEBUG("Created: %s", name);
+   }
+   return object;
 }
 
 // Maximum number of vertex attributes, per vertex descriptor
@@ -59,56 +59,56 @@ T safeCreate(T object, const char* name){
 constexpr uint32_t maximumVertexBindingCount = 31;
 
 Context::Context(RendererBackend& backend_)
-    : gfx::Context(mtl::maximumVertexBindingCount),
-    backend(backend_) {
-    MBGL_DEBUG("Context::Context()");
+   : gfx::Context(mtl::maximumVertexBindingCount),
+   backend(backend_) {
+   MBGL_DEBUG("Context::Context()");
 }
 
 Context::~Context() {
-    MBGL_DEBUG("Context::~Context()");
-    if (this->cleanupOnDestruction) {
-        this->backend.getThreadPool().runRenderJobs(true /* closeQueue */);
-        this->performCleanup();
-    
+   MBGL_DEBUG("Context::~Context()");
+   if (this->cleanupOnDestruction) {
+       this->backend.getThreadPool().runRenderJobs(true /* closeQueue */);
+       this->performCleanup();
+   
         if(this->emptyVertexBuffer){
-          safeRelease(this->emptyVertexBuffer, "emptyVertexBuffer");
-      }
-      if(this->tileVertexBuffer){
-            safeRelease(this->tileVertexBuffer, "tileVertexBuffer");
-      }
-        if(this->tileIndexBuffer){
-             safeRelease(this->tileIndexBuffer, "tileIndexBuffer");
+            safeRelease(this->emptyVertexBuffer, "emptyVertexBuffer");
+       }
+       if(this->tileVertexBuffer){
+          safeRelease(this->tileVertexBuffer, "tileVertexBuffer");
+       }
+       if(this->tileIndexBuffer){
+            safeRelease(this->tileIndexBuffer, "tileIndexBuffer");
+       }
+       if(this->clipMaskShader){
+          safeRelease(this->clipMaskShader, "clipMaskShader");
         }
-        if(this->clipMaskShader){
-           safeRelease(this->clipMaskShader, "clipMaskShader");
-         }
-        if(this->clipMaskDepthStencilState){
+       if(this->clipMaskDepthStencilState){
           safeRelease(this->clipMaskDepthStencilState, "clipMaskDepthStencilState");
-         }
-        if(this->clipMaskPipelineState){
-           safeRelease(this->clipMaskPipelineState, "clipMaskPipelineState");
         }
-         if(this->clipMaskUniformsBuffer){
+       if(this->clipMaskPipelineState){
+           safeRelease(this->clipMaskPipelineState, "clipMaskPipelineState");
+       }
+       if(this->clipMaskUniformsBuffer){
            if(*this->clipMaskUniformsBuffer){
                safeRelease(*this->clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
-            }
-           this->clipMaskUniformsBuffer.reset();
-        }
-        
-        this->clipMaskShader.reset();
-        this->clipMaskDepthStencilState.reset();
-        this->clipMaskPipelineState.reset();
-        this->stencilStateRenderable = nullptr;
+           }
+         this->clipMaskUniformsBuffer.reset();
+       }
+       
+       this->clipMaskShader.reset();
+       this->clipMaskDepthStencilState.reset();
+       this->clipMaskPipelineState.reset();
+       this->stencilStateRenderable = nullptr;
 
-        for (size_t i = 0; i < this->globalUniformBuffers.allocatedSize(); i++) {
-            this->globalUniformBuffers.set(i, nullptr);
-        }
+       for (size_t i = 0; i < this->globalUniformBuffers.allocatedSize(); i++) {
+          this->globalUniformBuffers.set(i, nullptr);
+       }
 
 #if !defined(NDEBUG)
-        Log::Debug(Event::General, "Rendering Stats:\n" + this->stats.toString("\n"));
+       Log::Debug(Event::General, "Rendering Stats:\n" + this->stats.toString("\n"));
 #endif
-        assert(this->stats.isZero());
-    }
+       assert(this->stats.isZero());
+   }
 }
 
 void Context::beginFrame() {
