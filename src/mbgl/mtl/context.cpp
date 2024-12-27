@@ -69,31 +69,30 @@ Context::~Context() {
     if (this->cleanupOnDestruction) {
         this->backend.getThreadPool().runRenderJobs(true /* closeQueue */);
         this->performCleanup();
-    
         if(this->emptyVertexBuffer){
-           safeRelease(this->emptyVertexBuffer, "emptyVertexBuffer");
+            safeRelease(this->emptyVertexBuffer, "emptyVertexBuffer");
         }
-        if(this->tileVertexBuffer){
-           safeRelease(this->tileVertexBuffer, "tileVertexBuffer");
+         if(this->tileVertexBuffer){
+             safeRelease(this->tileVertexBuffer, "tileVertexBuffer");
         }
         if(this->tileIndexBuffer){
-            safeRelease(this->tileIndexBuffer, "tileIndexBuffer");
+              safeRelease(this->tileIndexBuffer, "tileIndexBuffer");
         }
         if(this->clipMaskShader){
-          safeRelease(this->clipMaskShader, "clipMaskShader");
+            safeRelease(this->clipMaskShader, "clipMaskShader");
+         }
+         if(this->clipMaskDepthStencilState){
+              safeRelease(this->clipMaskDepthStencilState, "clipMaskDepthStencilState");
+          }
+         if(this->clipMaskPipelineState){
+             safeRelease(this->clipMaskPipelineState, "clipMaskPipelineState");
         }
-        if(this->clipMaskDepthStencilState){
-           safeRelease(this->clipMaskDepthStencilState, "clipMaskDepthStencilState");
+        if(this->clipMaskUniformsBuffer){
+            if(*this->clipMaskUniformsBuffer){
+                  safeRelease(*this->clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
+            }
+            this->clipMaskUniformsBuffer.reset();
         }
-       if(this->clipMaskPipelineState){
-            safeRelease(this->clipMaskPipelineState, "clipMaskPipelineState");
-        }
-       if(this->clipMaskUniformsBuffer){
-           if(*this->clipMaskUniformsBuffer){
-                safeRelease(*this->clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
-           }
-           this->clipMaskUniformsBuffer.reset();
-       }
         
         this->clipMaskShader.reset();
         this->clipMaskDepthStencilState.reset();

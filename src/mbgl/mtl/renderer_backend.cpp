@@ -1,4 +1,4 @@
-#include <mbgl/mtl/renderer_backend.hpp>
+#include "mbgl/mtl/renderer_backend.hpp"
 
 #include <mbgl/gfx/backend_scope.hpp>
 #include <mbgl/gfx/shader_registry.hpp>
@@ -61,20 +61,22 @@ namespace mtl {
     }
 
 RendererBackend::RendererBackend(const gfx::ContextMode contextMode_)
-    : gfx::RendererBackend(contextMode_),
-      device(safeCreate(MTL::CreateSystemDefaultDevice(), "MTLDevice")) {
+    : gfx::RendererBackend(contextMode_) {
     MBGL_DEBUG("RendererBackend::RendererBackend()");
+    device = safeCreate(MTL::CreateSystemDefaultDevice(), "MTLDevice");
      if(!device){
-       MBGL_ERROR("RendererBackend::RendererBackend - MTLDevice creation failed");
-            return;
-     }
-    commandQueue = safeCreate(NS::TransferPtr(device->newCommandQueue()), "MTLCommandQueue");
+        MBGL_ERROR("RendererBackend::RendererBackend - MTLDevice creation failed");
+          return;
+    }
+    commandQueue = safeCreate(device ? NS::TransferPtr(device->newCommandQueue()) : nullptr, "MTLCommandQueue");
      if(!commandQueue) {
-         MBGL_ERROR("RendererBackend::RendererBackend - MTLCommandQueue creation failed");
-         safeRelease(device, "MTLDevice");
-         device = nullptr;
-         return;
-     }
+        MBGL_ERROR("RendererBackend::RendererBackend - MTLCommandQueue creation failed");
+        safeRelease(device, "MTLDevice");
+        device = nullptr;
+       return;
+    }
+    
+
 #if TARGET_OS_SIMULATOR
     baseVertexInstanceDrawingSupported = true;
 #else
