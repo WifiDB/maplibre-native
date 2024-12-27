@@ -1,5 +1,5 @@
-#include <mbgl/util/logging.hpp>
-#include <mbgl/mtl/context.hpp>
+#include "mbgl/util/logging.hpp"
+#include "mbgl/mtl/context.hpp"
 
 #include <mbgl/gfx/shader_registry.hpp>
 #include <mbgl/mtl/command_encoder.hpp>
@@ -36,9 +36,9 @@ namespace mtl {
     
 // Helper function to release a Metal object
 template <typename T>
-void safeRelease(T object, const char* name) {
+void safeRelease(T* object, const char* name) { // Takes a pointer
     if (object) {
-        [object release];
+        [static_cast<NS::Object*>(object) release];
         MBGL_DEBUG("Released: %s", name);
     }
 }
@@ -69,31 +69,22 @@ Context::~Context() {
     if (this->cleanupOnDestruction) {
         this->backend.getThreadPool().runRenderJobs(true /* closeQueue */);
         this->performCleanup();
-        if(this->emptyVertexBuffer){
-            safeRelease(this->emptyVertexBuffer, "emptyVertexBuffer");
+
+        safeRelease(this->emptyVertexBuffer.get(), "emptyVertexBuffer");
+        if (this->tileVertexBuffer) {
+            safeRelease(*this->tileVertexBuffer, "tileVertexBuffer");
         }
-         if(this->tileVertexBuffer){
-             safeRelease(this->tileVertexBuffer, "tileVertexBuffer");
+        if (this->tileIndexBuffer) {
+            safeRelease(*this->tileIndexBuffer, "tileIndexBuffer");
         }
-        if(this->tileIndexBuffer){
-              safeRelease(this->tileIndexBuffer, "tileIndexBuffer");
-        }
-        if(this->clipMaskShader){
-            safeRelease(this->clipMaskShader, "clipMaskShader");
-         }
-         if(this->clipMaskDepthStencilState){
-              safeRelease(this->clipMaskDepthStencilState, "clipMaskDepthStencilState");
-          }
-         if(this->clipMaskPipelineState){
-             safeRelease(this->clipMaskPipelineState, "clipMaskPipelineState");
-        }
-        if(this->clipMaskUniformsBuffer){
-            if(*this->clipMaskUniformsBuffer){
-                  safeRelease(*this->clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
-            }
+        safeRelease(this->clipMaskShader.get(), "clipMaskShader");
+        safeRelease(this->clipMaskDepthStencilState.get(), "clipMaskDepthStencilState");
+        safeRelease(this->clipMaskPipelineState.get(), "clipMaskPipelineState");
+        if (this->clipMaskUniformsBuffer) {
+            safeRelease(*this->clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
             this->clipMaskUniformsBuffer.reset();
         }
-        
+
         this->clipMaskShader.reset();
         this->clipMaskDepthStencilState.reset();
         this->clipMaskPipelineState.reset();
@@ -109,7 +100,7 @@ Context::~Context() {
         assert(this->stats.isZero());
     }
 }
-
+    
 void Context::beginFrame() {
     MBGL_DEBUG("Context::beginFrame()");
     backend.getThreadPool().runRenderJobs();
@@ -129,7 +120,6 @@ BufferResource Context::createBuffer(
     MBGL_DEBUG("Context::createBuffer size: %zu isIndexBuffer: %d persistent: %d", size, isIndexBuffer, persistent);
     return {const_cast<Context&>(*this), data, size, MTL::ResourceStorageModeShared, isIndexBuffer, persistent};
 }
-
 
 UniqueShaderProgram Context::createProgram(shaders::BuiltIn shaderID,
     std::string name,
