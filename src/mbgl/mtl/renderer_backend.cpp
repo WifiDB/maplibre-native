@@ -1,4 +1,4 @@
-#include "mbgl/mtl/renderer_backend.hpp"
+#include <mbgl/mtl/renderer_backend.hpp>
 
 #include <mbgl/gfx/backend_scope.hpp>
 #include <mbgl/gfx/shader_registry.hpp>
