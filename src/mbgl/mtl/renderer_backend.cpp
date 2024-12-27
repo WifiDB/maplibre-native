@@ -85,8 +85,12 @@ RendererBackend::RendererBackend(const gfx::ContextMode contextMode_)
 
 RendererBackend::~RendererBackend() {
     MBGL_DEBUG("RendererBackend::~RendererBackend()");
-    safeRelease(commandQueue, "MTLCommandQueue");
-    safeRelease(device, "MTLDevice");
+    if(commandQueue){
+        safeRelease(commandQueue, "MTLCommandQueue");
+    }
+    if(device){
+        safeRelease(device, "MTLDevice");
+    }
 }
 
 std::unique_ptr<gfx::Context> RendererBackend::createContext() {
