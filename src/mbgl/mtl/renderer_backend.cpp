@@ -62,19 +62,20 @@ namespace mtl {
 
 RendererBackend::RendererBackend(const gfx::ContextMode contextMode_)
     : gfx::RendererBackend(contextMode_),
-      device(safeCreate(NS::TransferPtr(MTL::CreateSystemDefaultDevice()), "MTLDevice")),
-      commandQueue(safeCreate(device ? NS::TransferPtr(device->newCommandQueue()) : nullptr, "MTLCommandQueue")) {
+      device(safeCreate(MTLCreateSystemDefaultDevice(), "MTLDevice")) {
     MBGL_DEBUG("RendererBackend::RendererBackend()");
-    if(!device) {
-      MBGL_ERROR("RendererBackend::RendererBackend - MTLDevice creation failed");
-        return;
-    }
-    if(!commandQueue){
-        MBGL_ERROR("RendererBackend::RendererBackend - MTLCommandQueue creation failed");
-      safeRelease(device, "MTLDevice");
-        device = nullptr;
-      return;
-    }
+     if(!device){
+         MBGL_ERROR("RendererBackend::RendererBackend - MTLDevice creation failed");
+            return;
+     }
+    commandQueue = safeCreate(NS::TransferPtr(device->newCommandQueue()), "MTLCommandQueue");
+     if(!commandQueue) {
+       MBGL_ERROR("RendererBackend::RendererBackend - MTLCommandQueue creation failed");
+       safeRelease(device, "MTLDevice");
+         device = nullptr;
+       return;
+   }
+
 #if TARGET_OS_SIMULATOR
     baseVertexInstanceDrawingSupported = true;
 #else
@@ -89,7 +90,7 @@ RendererBackend::~RendererBackend() {
         safeRelease(commandQueue, "MTLCommandQueue");
     }
     if(device){
-        safeRelease(device, "MTLDevice");
+         safeRelease(device, "MTLDevice");
     }
 }
 
@@ -103,15 +104,15 @@ PremultipliedImage RendererBackend::readFramebuffer(const Size& size) {
     return PremultipliedImage(size);
 }
 
-void RendererBackend::assumeFramebufferBinding(const mtl::FramebufferID fbo) {
+void RendererBackend::assumeFramebufferBinding(const mtl::FramebufferID) {
     MBGL_DEBUG("RendererBackend::assumeFramebufferBinding()");
 }
 
-void RendererBackend::assumeViewport(int32_t x, int32_t y, const Size& size) {
+void RendererBackend::assumeViewport(int32_t, int32_t, const Size&) {
     MBGL_DEBUG("RendererBackend::assumeViewport()");
 }
 
-void RendererBackend::assumeScissorTest(bool enabled) {
+void RendererBackend::assumeScissorTest(bool) {
     MBGL_DEBUG("RendererBackend::assumeScissorTest()");
 }
 
@@ -120,15 +121,15 @@ bool RendererBackend::implicitFramebufferBound() {
     return false;
 }
 
-void RendererBackend::setFramebufferBinding(const mtl::FramebufferID fbo) {
+void RendererBackend::setFramebufferBinding(const mtl::FramebufferID) {
     MBGL_DEBUG("RendererBackend::setFramebufferBinding()");
 }
 
-void RendererBackend::setViewport(int32_t x, int32_t y, const Size& size) {
-    MBGL_DEBUG("RendererBackend::setViewport()");
+void RendererBackend::setViewport(int32_t, int32_t, const Size&) {
+     MBGL_DEBUG("RendererBackend::setViewport()");
 }
 
-void RendererBackend::setScissorTest(bool enabled) {
+void RendererBackend::setScissorTest(bool) {
      MBGL_DEBUG("RendererBackend::setScissorTest()");
 }
 
