@@ -38,8 +38,10 @@ namespace mtl {
 template <typename T>
 void safeRelease(T* object, const char* name) { // Takes a pointer
     if (object) {
-        [static_cast<NS::Object*>(object) release];
-        MBGL_DEBUG("Released: %s", name);
+        [object] { // Capture 'object' by value
+            [static_cast<NS::Object*>(object) release];
+            MBGL_DEBUG("Released: %s", name);
+        }(); // Immediately invoke the lambda
     }
 }
 
@@ -72,20 +74,20 @@ Context::~Context() {
 
         safeRelease(this->emptyVertexBuffer.get(), "emptyVertexBuffer");
         if (this->tileVertexBuffer) {
-            safeRelease(this->tileVertexBuffer->get(), "tileVertexBuffer");
+            safeRelease(&*this->tileVertexBuffer, "tileVertexBuffer"); // Take the address of the BufferResource
         }
         if (this->tileIndexBuffer) {
-            safeRelease(this->tileIndexBuffer->get(), "tileIndexBuffer");
+            safeRelease(&*this->tileIndexBuffer, "tileIndexBuffer");
         }
         if (this->clipMaskUniformsBuffer) {
-            safeRelease(this->clipMaskUniformsBuffer->get(), "clipMaskUniformsBuffer");
+            safeRelease(&*this->clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
             this->clipMaskUniformsBuffer.reset();
         }
         safeRelease(this->clipMaskShader.get(), "clipMaskShader"); // Assuming these are smart pointers
         safeRelease(this->clipMaskDepthStencilState.get(), "clipMaskDepthStencilState");
         safeRelease(this->clipMaskPipelineState.get(), "clipMaskPipelineState");
         if (this->clipMaskUniformsBuffer) {
-            safeRelease(*this->clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
+            safeRelease(&*this->clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
             this->clipMaskUniformsBuffer.reset();
         }
 
@@ -185,7 +187,7 @@ UniqueShaderProgram Context::createProgram(shaders::BuiltIn shaderID,
 
     const auto& device = backend.getDevice();
     auto library = safeCreate(NS::TransferPtr(device->newLibrary(nsSource, options.get(), &error)), "MTLLibrary");
-    safeRelease(options, "MTL::CompileOptions");
+    safeRelease(options.get(), "MTL::CompileOptions");
     safeRelease(nsSource, "NS::String Source");
 
     if (!library || error) {
