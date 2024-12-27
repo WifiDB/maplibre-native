@@ -65,49 +65,57 @@ Context::Context(RendererBackend& backend_)
     MBGL_DEBUG("Context::Context()");
 }
 
-Context::~Context() noexcept {
-    MBGL_DEBUG("Context::~Context()");
-    if (cleanupOnDestruction) {
-        backend.getThreadPool().runRenderJobs(true /* closeQueue */);
-        performCleanup();
-    
-        if(emptyVertexBuffer){
-          safeRelease(emptyVertexBuffer, "emptyVertexBuffer");
-        }
-        if(tileVertexBuffer){
-           safeRelease(tileVertexBuffer, "tileVertexBuffer");
-        }
-        if(tileIndexBuffer){
-           safeRelease(tileIndexBuffer, "tileIndexBuffer");
-        }
-        if(clipMaskShader){
-           safeRelease(clipMaskShader, "clipMaskShader");
-        }
-        if(clipMaskDepthStencilState){
-           safeRelease(clipMaskDepthStencilState, "clipMaskDepthStencilState");
-        }
-        if(clipMaskPipelineState){
-          safeRelease(clipMaskPipelineState, "clipMaskPipelineState");
-        }
-        if(clipMaskUniformsBuffer){
-           safeRelease(clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
-            clipMaskUniformsBuffer.reset();
-        }
-        
-        clipMaskShader.reset();
-        clipMaskDepthStencilState.reset();
-        clipMaskPipelineState.reset();
-        stencilStateRenderable = nullptr;
+Context::Context(RendererBackend& backend_)
+  : gfx::Context(mtl::maximumVertexBindingCount),
+  backend(backend_) {
+  MBGL_DEBUG("Context::Context()");
+}
 
-        for (size_t i = 0; i < globalUniformBuffers.allocatedSize(); i++) {
-            globalUniformBuffers.set(i, nullptr);
-        }
+~Context() {
+  MBGL_DEBUG("Context::~Context()");
+  if (cleanupOnDestruction) {
+      backend.getThreadPool().runRenderJobs(true /* closeQueue */);
+      performCleanup();
+  
+    if(emptyVertexBuffer){
+          safeRelease(emptyVertexBuffer, "emptyVertexBuffer");
+    }
+    if(tileVertexBuffer){
+          safeRelease(tileVertexBuffer, "tileVertexBuffer");
+    }
+      if(tileIndexBuffer){
+           safeRelease(tileIndexBuffer, "tileIndexBuffer");
+      }
+      if(clipMaskShader){
+         safeRelease(clipMaskShader, "clipMaskShader");
+       }
+      if(clipMaskDepthStencilState){
+        safeRelease(clipMaskDepthStencilState, "clipMaskDepthStencilState");
+       }
+      if(clipMaskPipelineState){
+         safeRelease(clipMaskPipelineState, "clipMaskPipelineState");
+      }
+       if(clipMaskUniformsBuffer){
+         if(*clipMaskUniformsBuffer){
+             safeRelease(*clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
+         }
+         clipMaskUniformsBuffer.reset();
+     }
+      
+      clipMaskShader.reset();
+      clipMaskDepthStencilState.reset();
+      clipMaskPipelineState.reset();
+      stencilStateRenderable = nullptr;
+
+      for (size_t i = 0; i < globalUniformBuffers.allocatedSize(); i++) {
+          globalUniformBuffers.set(i, nullptr);
+      }
 
 #if !defined(NDEBUG)
-        Log::Debug(Event::General, "Rendering Stats:\n" + stats.toString("\n"));
+      Log::Debug(Event::General, "Rendering Stats:\n" + stats.toString("\n"));
 #endif
-        assert(stats.isZero());
-    }
+      assert(stats.isZero());
+  }
 }
 
 void Context::beginFrame() {
