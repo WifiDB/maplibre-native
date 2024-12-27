@@ -1,4 +1,4 @@
-#include <mbgl/util/logging.hpp?
+#include <mbgl/util/logging.hpp>
 #include <mbgl/mtl/context.hpp>
 
 #include <mbgl/gfx/shader_registry.hpp>
