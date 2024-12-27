@@ -72,50 +72,49 @@ Context::Context(RendererBackend& backend_)
 }
 
 ~Context() {
-  MBGL_DEBUG("Context::~Context()");
-  if (cleanupOnDestruction) {
-      backend.getThreadPool().runRenderJobs(true /* closeQueue */);
-      performCleanup();
-  
-    if(emptyVertexBuffer){
+    MBGL_DEBUG("Context::~Context()");
+    if (cleanupOnDestruction) {
+        backend.getThreadPool().runRenderJobs(true /* closeQueue */);
+        performCleanup();
+        if(emptyVertexBuffer){
           safeRelease(emptyVertexBuffer, "emptyVertexBuffer");
-    }
-    if(tileVertexBuffer){
-          safeRelease(tileVertexBuffer, "tileVertexBuffer");
-    }
-      if(tileIndexBuffer){
-           safeRelease(tileIndexBuffer, "tileIndexBuffer");
-      }
-      if(clipMaskShader){
-         safeRelease(clipMaskShader, "clipMaskShader");
-       }
-      if(clipMaskDepthStencilState){
-        safeRelease(clipMaskDepthStencilState, "clipMaskDepthStencilState");
-       }
-      if(clipMaskPipelineState){
-         safeRelease(clipMaskPipelineState, "clipMaskPipelineState");
-      }
-       if(clipMaskUniformsBuffer){
-         if(*clipMaskUniformsBuffer){
-             safeRelease(*clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
+        }
+        if(tileVertexBuffer){
+            safeRelease(tileVertexBuffer, "tileVertexBuffer");
+        }
+        if(tileIndexBuffer){
+             safeRelease(tileIndexBuffer, "tileIndexBuffer");
+        }
+        if(clipMaskShader){
+           safeRelease(clipMaskShader, "clipMaskShader");
          }
-         clipMaskUniformsBuffer.reset();
-     }
-      
-      clipMaskShader.reset();
-      clipMaskDepthStencilState.reset();
-      clipMaskPipelineState.reset();
-      stencilStateRenderable = nullptr;
+        if(clipMaskDepthStencilState){
+          safeRelease(clipMaskDepthStencilState, "clipMaskDepthStencilState");
+         }
+        if(clipMaskPipelineState){
+           safeRelease(clipMaskPipelineState, "clipMaskPipelineState");
+        }
+         if(clipMaskUniformsBuffer){
+           if(*clipMaskUniformsBuffer){
+                safeRelease(*clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
+           }
+           clipMaskUniformsBuffer.reset();
+        }
+        
+        clipMaskShader.reset();
+        clipMaskDepthStencilState.reset();
+        clipMaskPipelineState.reset();
+        stencilStateRenderable = nullptr;
 
-      for (size_t i = 0; i < globalUniformBuffers.allocatedSize(); i++) {
-          globalUniformBuffers.set(i, nullptr);
-      }
+        for (size_t i = 0; i < globalUniformBuffers.allocatedSize(); i++) {
+            globalUniformBuffers.set(i, nullptr);
+        }
 
 #if !defined(NDEBUG)
-      Log::Debug(Event::General, "Rendering Stats:\n" + stats.toString("\n"));
+        Log::Debug(Event::General, "Rendering Stats:\n" + stats.toString("\n"));
 #endif
-      assert(stats.isZero());
-  }
+        assert(stats.isZero());
+    }
 }
 
 void Context::beginFrame() {
@@ -435,29 +434,37 @@ bool Context::renderTileClippingMasks(gfx::RenderPass& renderPass,
     mtlRenderPass.setDepthStencilState(clipMaskDepthStencilState);
     
     
-    if (!clipMaskPipelineState) {
+if (!clipMaskPipelineState) {
         MBGL_DEBUG("Creating new clipMaskPipelineState");
-        // A vertex descriptor tells Metal what's in the vertex buffer
-        auto vertDesc = safeCreate(NS::RetainPtr(MTL::VertexDescriptor::vertexDescriptor()), "MTL::VertexDescriptor");
-        auto attribDesc = safeCreate(NS::TransferPtr(MTL::VertexAttributeDescriptor::alloc()->init()), "MTL::VertexAttributeDescriptor");
-        auto layoutDesc = safeCreate(NS::TransferPtr(MTL::VertexBufferLayoutDescriptor::alloc()->init()), "MTL::VertexBufferLayoutDescriptor");
-        if (!vertDesc || !attribDesc || !layoutDesc) {
-            MBGL_ERROR("Failed to create vertex descriptor");
-            return false;
-        }
+    // A vertex descriptor tells Metal what's in the vertex buffer
+    auto vertDesc = safeCreate(NS::RetainPtr(MTL::VertexDescriptor::vertexDescriptor()), "MTL::VertexDescriptor");
+    if(!vertDesc){
+        return false;
+    }
+    auto attribDesc = safeCreate(NS::TransferPtr(MTL::VertexAttributeDescriptor::alloc()->init()), "MTL::VertexAttributeDescriptor");
+      if(!attribDesc){
+        safeRelease(vertDesc, "MTL::VertexDescriptor");
+        return false;
+    }
+    auto layoutDesc = safeCreate(NS::TransferPtr(MTL::VertexBufferLayoutDescriptor::alloc()->init()), "MTL::VertexBufferLayoutDescriptor");
+    if(!layoutDesc) {
+        safeRelease(vertDesc, "MTL::VertexDescriptor");
+        safeRelease(attribDesc, "MTL::VertexAttributeDescriptor");
+      return false;
+    }
     
-        MBGL_DEBUG("Creating vertex descriptor");
-        attribDesc->setBufferIndex(ShaderClass::attributes[0].index);
-        attribDesc->setOffset(0);
-        attribDesc->setFormat(MTL::VertexFormatShort2);
-        layoutDesc->setStride(static_cast<NS::UInteger>(vertexSize));
-        layoutDesc->setStepFunction(MTL::VertexStepFunctionPerVertex);
-        layoutDesc->setStepRate(1);
-        vertDesc->attributes()->setObject(attribDesc.get(), ShaderClass::attributes[0].index);
-        vertDesc->layouts()->setObject(layoutDesc.get(), ShaderClass::attributes[0].index);
+      MBGL_DEBUG("Creating vertex descriptor");
+    attribDesc->setBufferIndex(ShaderClass::attributes[0].index);
+    attribDesc->setOffset(0);
+    attribDesc->setFormat(MTL::VertexFormatShort2);
+    layoutDesc->setStride(static_cast<NS::UInteger>(vertexSize));
+    layoutDesc->setStepFunction(MTL::VertexStepFunctionPerVertex);
+    layoutDesc->setStepRate(1);
+    vertDesc->attributes()->setObject(attribDesc.get(), ShaderClass::attributes[0].index);
+    vertDesc->layouts()->setObject(layoutDesc.get(), ShaderClass::attributes[0].index);
     
-        
-        MBGL_DEBUG("vertex attributes index: %d format: %d vertexSize: %zu stepFunction: %d stepRate: %d", ShaderClass::attributes[0].index, MTL::VertexFormatShort2, vertexSize, MTL::VertexStepFunctionPerVertex, 1);
+    
+      MBGL_DEBUG("vertex attributes index: %d format: %d vertexSize: %zu stepFunction: %d stepRate: %d", ShaderClass::attributes[0].index, MTL::VertexFormatShort2, vertexSize, MTL::VertexStepFunctionPerVertex, 1);
 
         // Create a render pipeline state, telling Metal how to render the primitives
         const auto& renderPassDescriptor = mtlRenderPass.getDescriptor();
