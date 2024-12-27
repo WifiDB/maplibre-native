@@ -19,6 +19,16 @@ constexpr auto SeverityCount = underlying_type(EventSeverity::SeverityCount);
 std::atomic<bool> useThread[SeverityCount] = {true, true, true, false};
 std::mutex mutex;
 
+#ifdef MBGL_DEBUG
+    #define MBGL_DEBUG_LOG(severity, event, code, msg) \
+        if (severity == EventSeverity::Debug) { \
+            Log::record(severity, event, code, msg); \
+        }
+#else
+    #define MBGL_DEBUG_LOG(severity, event, code, msg)
+#endif
+
+
 } // namespace
 
 class Log::Impl {
@@ -112,5 +122,4 @@ void Log::record(EventSeverity severity,
 
     platformRecord(severity, logStream.str());
 }
-
 } // namespace mbgl

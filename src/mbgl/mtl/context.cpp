@@ -39,7 +39,7 @@ template <typename T>
 void safeRelease(T* object, const char* name) { // Takes a pointer
     if (object) {
         [static_cast<NS::Object*>(object) release];
-        MBGL_DEBUG("Released: %s", name);
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1,  "Released: %s", name);
     }
 }
 
@@ -49,7 +49,7 @@ T safeCreate(T object, const char* name){
     if(!object){
         MBGL_ERROR("Failed to create: %s", name);
     } else {
-        MBGL_DEBUG("Created: %s", name);
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1,  "Created: %s", name);
     }
     return object;
 }
@@ -61,11 +61,11 @@ constexpr uint32_t maximumVertexBindingCount = 31;
 Context::Context(RendererBackend& backend_)
     : gfx::Context(mtl::maximumVertexBindingCount),
     backend(backend_) {
-    MBGL_DEBUG("Context::Context()");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::Context()");
 }
 
 Context::~Context() {
-    MBGL_DEBUG("Context::~Context()");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::~Context()");
     if (this->cleanupOnDestruction) {
         this->backend.getThreadPool().runRenderJobs(true /* closeQueue */);
         this->performCleanup();
@@ -106,22 +106,22 @@ Context::~Context() {
 }
     
 void Context::beginFrame() {
-    MBGL_DEBUG("Context::beginFrame()");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::beginFrame()");
     backend.getThreadPool().runRenderJobs();
 }
 
 void Context::endFrame() {
-    MBGL_DEBUG("Context::endFrame()");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::endFrame()");
 }
     
 std::unique_ptr<gfx::CommandEncoder> Context::createCommandEncoder() {
-  MBGL_DEBUG("Context::createCommandEncoder()");
-  return std::make_unique<CommandEncoder>(*this);
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createCommandEncoder()");
+    return std::make_unique<CommandEncoder>(*this);
 }
 
 BufferResource Context::createBuffer(
     const void* data, std::size_t size, gfx::BufferUsageType, bool isIndexBuffer, bool persistent) const {
-    MBGL_DEBUG("Context::createBuffer size: %zu isIndexBuffer: %d persistent: %d", size, isIndexBuffer, persistent);
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createBuffer size: %zu isIndexBuffer: %d persistent: %d", size, isIndexBuffer, persistent);
     return {const_cast<Context&>(*this), data, size, MTL::ResourceStorageModeShared, isIndexBuffer, persistent};
 }
 
@@ -132,7 +132,7 @@ UniqueShaderProgram Context::createProgram(shaders::BuiltIn shaderID,
     const std::string_view fragmentName,
     const ProgramParameters& programParameters,
     const mbgl::unordered_map<std::string, std::string>& additionalDefines) {
-    MBGL_DEBUG("Context::createProgram name: %s", name.c_str());
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createProgram name: %s", name.c_str());
 
     const auto pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
 
@@ -149,12 +149,12 @@ UniqueShaderProgram Context::createProgram(shaders::BuiltIn shaderID,
         rawDefines.insert(std::next(rawDefines.begin(), rawDefines.size() / 2), nsKey);
         rawDefines.insert(rawDefines.end(), nsVal);
         defineStr += "#define " + pair.first + " " + pair.second + "\n";
-        MBGL_DEBUG("Define added: %s %s", pair.first.c_str(), pair.second.c_str());
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Define added: %s %s", pair.first.c_str(), pair.second.c_str());
     };
     std::for_each(programDefines.begin(), programDefines.end(), addDefine);
     std::for_each(additionalDefines.begin(), additionalDefines.end(), addDefine);
     
-    MBGL_DEBUG("Defines: %s", defineStr.c_str());
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Defines: %s", defineStr.c_str());
 
     observer->onPreCompileShader(shaderID, gfx::Backend::Type::Metal, defineStr);
 
@@ -225,74 +225,74 @@ UniqueShaderProgram Context::createProgram(shaders::BuiltIn shaderID,
     auto shader = std::make_unique<ShaderProgram>(
         std::move(name), backend, std::move(vertexFunction), std::move(fragmentFunction));
     observer->onPostCompileShader(shaderID, gfx::Backend::Type::Metal, defineStr);
-    MBGL_DEBUG("Shader %s created", name.c_str());
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Shader %s created", name.c_str());
     return shader;
 }
 
 MTLTexturePtr Context::createMetalTexture(MTLTextureDescriptorPtr textureDescriptor) const {
-    MBGL_DEBUG("Context::createMetalTexture");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createMetalTexture");
     return safeCreate(NS::TransferPtr(backend.getDevice()->newTexture(textureDescriptor.get())), "MTLTexture");
 }
 
 MTLSamplerStatePtr Context::createMetalSamplerState(MTLSamplerDescriptorPtr samplerDescriptor) const {
-    MBGL_DEBUG("Context::createMetalSamplerState");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createMetalSamplerState");
     return safeCreate(NS::TransferPtr(backend.getDevice()->newSamplerState(samplerDescriptor.get())), "MTLSamplerState");
 }
 
 void Context::performCleanup() {
-    MBGL_DEBUG("Context::performCleanup()");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::performCleanup()");
     stats.numDrawCalls = 0;
     stats.numFrames++;
     clipMaskUniformsBufferUsed = false;
 }
 
 gfx::UniqueDrawableBuilder Context::createDrawableBuilder(std::string name) {
-    MBGL_DEBUG("Context::createDrawableBuilder %s", name.c_str());
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createDrawableBuilder %s", name.c_str());
     return std::make_unique<DrawableBuilder>(std::move(name));
 }
 
 gfx::UniformBufferPtr Context::createUniformBuffer(const void* data, std::size_t size, bool persistent) {
-    MBGL_DEBUG("Context::createUniformBuffer %zu persistent: %d", size, persistent);
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createUniformBuffer %zu persistent: %d", size, persistent);
     return std::make_shared<UniformBuffer>(
         createBuffer(data, size, gfx::BufferUsageType::StaticDraw, /*isIndexBuffer=*/false, persistent));
 }
 
 gfx::ShaderProgramBasePtr Context::getGenericShader(gfx::ShaderRegistry& shaders, const std::string& name) {
-    MBGL_DEBUG("Context::getGenericShader %s", name.c_str());
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::getGenericShader %s", name.c_str());
     const auto shaderGroup = shaders.getShaderGroup(name);
     auto shader = shaderGroup ? shaderGroup->getOrCreateShader(*this, {}) : gfx::ShaderProgramBasePtr{};
     return std::static_pointer_cast<gfx::ShaderProgramBase>(std::move(shader));
 }
 
 TileLayerGroupPtr Context::createTileLayerGroup(int32_t layerIndex, std::size_t initialCapacity, std::string name) {
-    MBGL_DEBUG("Context::createTileLayerGroup %d %zu %s", layerIndex, initialCapacity, name.c_str());
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createTileLayerGroup %d %zu %s", layerIndex, initialCapacity, name.c_str());
     return std::make_shared<TileLayerGroup>(layerIndex, initialCapacity, std::move(name));
 }
 
 LayerGroupPtr Context::createLayerGroup(int32_t layerIndex, std::size_t initialCapacity, std::string name) {
-    MBGL_DEBUG("Context::createLayerGroup %d %zu %s", layerIndex, initialCapacity, name.c_str());
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createLayerGroup %d %zu %s", layerIndex, initialCapacity, name.c_str());
     return std::make_shared<LayerGroup>(layerIndex, initialCapacity, name);
 }
 
 gfx::Texture2DPtr Context::createTexture2D() {
-    MBGL_DEBUG("Context::createTexture2D");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createTexture2D");
     return std::make_shared<Texture2D>(*this);
 }
 
 RenderTargetPtr Context::createRenderTarget(const Size size, const gfx::TextureChannelDataType type) {
-    MBGL_DEBUG("Context::createRenderTarget width: %d height: %d type: %d", size.width, size.height, (int)type);
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createRenderTarget width: %d height: %d type: %d", size.width, size.height, (int)type);
     return std::make_shared<RenderTarget>(*this, size, type);
 }
 
 void Context::resetState(gfx::DepthMode depthMode, gfx::ColorMode colorMode) {
-    MBGL_DEBUG("Context::resetState");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::resetState");
 }
 
 bool Context::emplaceOrUpdateUniformBuffer(gfx::UniformBufferPtr& buffer,
     const void* data,
     std::size_t size,
     bool persistent) {
-    MBGL_DEBUG("Context::emplaceOrUpdateUniformBuffer size: %zu persistent: %d", size, persistent);
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::emplaceOrUpdateUniformBuffer size: %zu persistent: %d", size, persistent);
     if (buffer) {
         buffer->update(data, size);
         return false;
@@ -303,10 +303,10 @@ bool Context::emplaceOrUpdateUniformBuffer(gfx::UniformBufferPtr& buffer,
 }
 
 const BufferResource& Context::getTileVertexBuffer() {
-    MBGL_DEBUG("Context::getTileVertexBuffer");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::getTileVertexBuffer");
     if (!tileVertexBuffer) {
         const auto vertices = RenderStaticData::tileVertices();
-        MBGL_DEBUG("Context::getTileVertexBuffer: Creating tileVertexBuffer");
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::getTileVertexBuffer: Creating tileVertexBuffer");
         tileVertexBuffer.emplace(createBuffer(vertices.data(),
             vertices.bytes(),
             gfx::BufferUsageType::StaticDraw,
@@ -317,10 +317,10 @@ const BufferResource& Context::getTileVertexBuffer() {
 }
 
 const BufferResource& Context::getTileIndexBuffer() {
-    MBGL_DEBUG("Context::getTileIndexBuffer");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::getTileIndexBuffer");
     if (!tileIndexBuffer) {
         const auto indexes = RenderStaticData::quadTriangleIndices();
-        MBGL_DEBUG("Context::getTileIndexBuffer: Creating tileIndexBuffer");
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::getTileIndexBuffer: Creating tileIndexBuffer");
         tileIndexBuffer.emplace(createBuffer(indexes.data(),
             indexes.bytes(),
             gfx::BufferUsageType::StaticDraw,
@@ -331,9 +331,9 @@ const BufferResource& Context::getTileIndexBuffer() {
 }
 
 const UniqueVertexBufferResource& Context::getEmptyVertexBuffer() {
-    MBGL_DEBUG("Context::getEmptyVertexBuffer");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::getEmptyVertexBuffer");
     if (!emptyVertexBuffer) {
-        MBGL_DEBUG("Context::getEmptyVertexBuffer: Creating emptyVertexBuffer");
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::getEmptyVertexBuffer: Creating emptyVertexBuffer");
         // This buffer is bound to vertex attribtue indexes when the uniforms are used instead and
         // shaders are expected not to access the attribute values, but Metal requires a binding.
         // This buffer could also hold a single default value applied for all vertices, in which case
@@ -363,13 +363,13 @@ const auto clipMaskDepthMode = gfx::DepthMode{/*.func=*/gfx::DepthFunctionType::
 bool Context::renderTileClippingMasks(gfx::RenderPass& renderPass,
     RenderStaticData& staticData,
     const std::vector<shaders::ClipUBO>& tileUBOs) {
-    MBGL_DEBUG("Context::renderTileClippingMasks ubo size: %zu", tileUBOs.size());
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::renderTileClippingMasks ubo size: %zu", tileUBOs.size());
     using ShaderClass = shaders::ShaderSource<shaders::BuiltIn::ClippingMaskProgram, gfx::Backend::Type::Metal>;
 
     if (!clipMaskShader) {
         const auto group = staticData.shaders->getShaderGroup("ClippingMaskProgram");
         if (group) {
-            MBGL_DEBUG("Context::renderTileClippingMasks getting ClippingMaskProgram from shader group");
+            MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::renderTileClippingMasks getting ClippingMaskProgram from shader group");
             clipMaskShader = std::static_pointer_cast<gfx::ShaderProgramBase>(group->getOrCreateShader(*this, {}));
         }
     }
@@ -404,7 +404,7 @@ bool Context::renderTileClippingMasks(gfx::RenderPass& renderPass,
     const auto& renderable = renderPassDescriptor.renderable;
     if (stencilStateRenderable != &renderable) {
         // We're on a new renderable, invalidate objects constructed for the previous one.
-        MBGL_DEBUG("Creating new depth/stencil state for new renderable");
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Creating new depth/stencil state for new renderable");
         clipMaskPipelineState.reset();
         clipMaskDepthStencilState.reset();
         stencilStateRenderable = &renderable;
@@ -413,7 +413,7 @@ bool Context::renderTileClippingMasks(gfx::RenderPass& renderPass,
     // Create the depth-stencil state, if necessary.
     if (!clipMaskDepthStencilState) {
         if (auto depthStencilState = makeDepthStencilState(clipMaskDepthMode, clipMaskStencilMode, renderable)) {
-            MBGL_DEBUG("Created depth stencil state");
+            MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Created depth stencil state");
             clipMaskDepthStencilState = std::move(depthStencilState);
         }
     }
@@ -422,7 +422,7 @@ bool Context::renderTileClippingMasks(gfx::RenderPass& renderPass,
     
     
     if (!clipMaskPipelineState) {
-        MBGL_DEBUG("Creating new clipMaskPipelineState");
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Creating new clipMaskPipelineState");
         // A vertex descriptor tells Metal what's in the vertex buffer
         auto vertDesc = safeCreate(NS::RetainPtr(MTL::VertexDescriptor::vertexDescriptor()), "MTL::VertexDescriptor");
         if(!vertDesc){
@@ -430,8 +430,8 @@ bool Context::renderTileClippingMasks(gfx::RenderPass& renderPass,
         }
         auto attribDesc = safeCreate(NS::TransferPtr(MTL::VertexAttributeDescriptor::alloc()->init()), "MTL::VertexAttributeDescriptor");
          if(!attribDesc){
-            safeRelease(vertDesc, "MTL::VertexDescriptor");
-            return false;
+             safeRelease(vertDesc, "MTL::VertexDescriptor");
+             return false;
          }
         auto layoutDesc = safeCreate(NS::TransferPtr(MTL::VertexBufferLayoutDescriptor::alloc()->init()), "MTL::VertexBufferLayoutDescriptor");
         if(!layoutDesc){
@@ -440,7 +440,7 @@ bool Context::renderTileClippingMasks(gfx::RenderPass& renderPass,
               return false;
         }
     
-        MBGL_DEBUG("Creating vertex descriptor");
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Creating vertex descriptor");
         attribDesc->setBufferIndex(ShaderClass::attributes[0].index);
         attribDesc->setOffset(0);
         attribDesc->setFormat(MTL::VertexFormatShort2);
@@ -451,7 +451,7 @@ bool Context::renderTileClippingMasks(gfx::RenderPass& renderPass,
         vertDesc->layouts()->setObject(layoutDesc.get(), ShaderClass::attributes[0].index);
     
     
-        MBGL_DEBUG("vertex attributes index: %d format: %d vertexSize: %zu stepFunction: %d stepRate: %d", ShaderClass::attributes[0].index, MTL::VertexFormatShort2, vertexSize, MTL::VertexStepFunctionPerVertex, 1);
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "vertex attributes index: %d format: %d vertexSize: %zu stepFunction: %d stepRate: %d", ShaderClass::attributes[0].index, MTL::VertexFormatShort2, vertexSize, MTL::VertexStepFunctionPerVertex, 1);
 
         // Create a render pipeline state, telling Metal how to render the primitives
         const auto& renderPassDescriptor = mtlRenderPass.getDescriptor();
@@ -462,13 +462,13 @@ bool Context::renderTileClippingMasks(gfx::RenderPass& renderPass,
             MTL::VertexStepFunctionPerVertex,
             1);
         
-        MBGL_DEBUG("pipeline hash: %zu colorMode: %zu", hash, colorMode.hash());
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "pipeline hash: %zu colorMode: %zu", hash, colorMode.hash());
         if (auto state = mtlShader.getRenderPipelineState(
             renderable, vertDesc, colorMode, mbgl::util::hash(colorMode.hash(), hash))) {
-            MBGL_DEBUG("Created clipMaskPipelineState from cache");
+            MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Created clipMaskPipelineState from cache");
             clipMaskPipelineState = std::move(state);
         } else {
-           MBGL_DEBUG("Created new clipMaskPipelineState");
+           MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Created new clipMaskPipelineState");
         }
         
         safeRelease(vertDesc, "MTL::VertexDescriptor");
@@ -490,7 +490,7 @@ bool Context::renderTileClippingMasks(gfx::RenderPass& renderPass,
     auto& uboBuffer = clipMaskUniformsBufferUsed ? tempBuffer : clipMaskUniformsBuffer;
     clipMaskUniformsBufferUsed = true;
     if (!uboBuffer || !*uboBuffer || uboBuffer->getSizeInBytes() < bufferSize) {
-        MBGL_DEBUG("Creating new ubo buffer: %zu", bufferSize);
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Creating new ubo buffer: %zu", bufferSize);
         uboBuffer = createBuffer(tileUBOs.data(),
             bufferSize,
             gfx::BufferUsageType::StaticDraw,
@@ -501,7 +501,7 @@ bool Context::renderTileClippingMasks(gfx::RenderPass& renderPass,
             return false;
         }
     } else {
-        MBGL_DEBUG("Updating ubo buffer: %zu", bufferSize);
+         MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Updating ubo buffer: %zu", bufferSize);
         uboBuffer->update(tileUBOs.data(), bufferSize, /*offset=*/0);
     }
 
@@ -525,7 +525,7 @@ bool Context::renderTileClippingMasks(gfx::RenderPass& renderPass,
 #else
     const auto uboIndex = ShaderClass::uniforms[0].index;
     for (std::size_t ii = 0; ii < tileUBOs.size(); ++ii) {
-        MBGL_DEBUG("Draw call: %zu stencilRef: %d", ii, tileUBOs[ii].stencil_ref);
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Draw call: %zu stencilRef: %d", ii, tileUBOs[ii].stencil_ref);
         encoder->setStencilReferenceValue(tileUBOs[ii].stencil_ref);
         mtlRenderPass.bindVertex(*uboBuffer, /*offset=*/ii * uboSize, uboIndex, /*size=*/uboSize);
         encoder->drawIndexedPrimitives(MTL::PrimitiveType::PrimitiveTypeTriangle,
@@ -543,58 +543,58 @@ bool Context::renderTileClippingMasks(gfx::RenderPass& renderPass,
 }
 
 void Context::setDirtyState() {
-    MBGL_DEBUG("Context::setDirtyState");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::setDirtyState");
 }
 
 std::unique_ptr<gfx::OffscreenTexture> Context::createOffscreenTexture(Size size,
     gfx::TextureChannelDataType type,
     bool depth,
     bool stencil) {
-    MBGL_DEBUG("Context::createOffscreenTexture width: %d height: %d type: %d depth: %d stencil: %d", size.width, size.height, (int)type, depth, stencil);
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createOffscreenTexture width: %d height: %d type: %d depth: %d stencil: %d", size.width, size.height, (int)type, depth, stencil);
     return std::make_unique<OffscreenTexture>(*this, size, type, depth, stencil);
 }
 
 std::unique_ptr<gfx::OffscreenTexture> Context::createOffscreenTexture(Size size, gfx::TextureChannelDataType type) {
-    MBGL_DEBUG("Context::createOffscreenTexture width: %d height: %d type: %d", size.width, size.height, (int)type);
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createOffscreenTexture width: %d height: %d type: %d", size.width, size.height, (int)type);
     return createOffscreenTexture(size, type, false, false);
 }
 
 std::unique_ptr<gfx::TextureResource> Context::createTextureResource(Size,
     gfx::TexturePixelType,
     gfx::TextureChannelDataType) {
-    MBGL_DEBUG("Context::createTextureResource");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createTextureResource");
     assert(false);
     return nullptr;
 }
 
 std::unique_ptr<gfx::RenderbufferResource> Context::createRenderbufferResource(gfx::RenderbufferPixelType, Size size) {
-    MBGL_DEBUG("Context::createRenderbufferResource width: %d height: %d", size.width, size.height);
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createRenderbufferResource width: %d height: %d", size.width, size.height);
     return std::make_unique<RenderbufferResource>();
 }
 
 std::unique_ptr<gfx::DrawScopeResource> Context::createDrawScopeResource() {
-    MBGL_DEBUG("Context::createDrawScopeResource");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createDrawScopeResource");
     assert(false);
     return nullptr;
 }
 
 gfx::VertexAttributeArrayPtr Context::createVertexAttributeArray() const {
-    MBGL_DEBUG("Context::createVertexAttributeArray");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::createVertexAttributeArray");
     return std::make_shared<VertexAttributeArray>();
 }
 
 #if !defined(NDEBUG)
 void Context::visualizeStencilBuffer() {
-    MBGL_DEBUG("Context::visualizeStencilBuffer");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::visualizeStencilBuffer");
 }
 
 void Context::visualizeDepthBuffer(float depthRangeSize) {
-    MBGL_DEBUG("Context::visualizeDepthBuffer");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::visualizeDepthBuffer");
 }
 #endif // !defined(NDEBUG)
 
 void Context::clearStencilBuffer(int32_t) {
-    MBGL_DEBUG("Context::clearStencilBuffer");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::clearStencilBuffer");
     // See `PaintParameters::clearStencil`
     assert(false);
 }
@@ -667,7 +667,7 @@ MTL::StencilOperation mapOperation(const gfx::StencilOpType op) {
 }
 
 void applyDepthMode(const gfx::DepthMode& depthMode, MTL::DepthStencilDescriptor* desc) {
-    MBGL_DEBUG("applyDepthMode func: %d mask: %d", (int)depthMode.func, (int)depthMode.mask);
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "applyDepthMode func: %d mask: %d", (int)depthMode.func, (int)depthMode.mask);
     desc->setDepthCompareFunction(mapFunc(depthMode.func));
     desc->setDepthWriteEnabled(depthMode.mask == gfx::DepthMaskType::ReadWrite);
     // depthMode.range ?
@@ -680,17 +680,17 @@ struct StencilModeVisitor {
 
     template <gfx::StencilFunctionType F>
     void operator()(const gfx::StencilMode::SimpleTest<F>& mode) {
-        MBGL_DEBUG("StencilModeVisitor::SimpleTest func: %d", (int)mode.func);
+        MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "StencilModeVisitor::SimpleTest func: %d", (int)mode.func);
         apply(mode.func, std::numeric_limits<uint32_t>::max());
     }
     template <gfx::StencilFunctionType F>
     void operator()(const gfx::StencilMode::MaskedTest<F>& mode) {
-        MBGL_DEBUG("StencilModeVisitor::MaskedTest func: %d mask: %d", (int)mode.func, mode.mask);
+         MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "StencilModeVisitor::MaskedTest func: %d mask: %d", (int)mode.func, mode.mask);
         apply(mode.func, mode.mask);
     }
 
     void apply(gfx::StencilFunctionType func, uint32_t mask) {
-        MBGL_DEBUG("StencilModeVisitor::apply func: %d mask: %d", (int)func, mask);
+         MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "StencilModeVisitor::apply func: %d mask: %d", (int)func, mask);
         desc->setStencilCompareFunction(mapFunc(func));
         desc->setReadMask(mask);
         desc->setWriteMask(mask);
@@ -699,8 +699,8 @@ struct StencilModeVisitor {
 
 // helper type for the visitor #4
 void applyStencilMode(const gfx::StencilMode& stencilMode, MTL::StencilDescriptor* desc) {
-    MBGL_DEBUG("applyStencilMode");
-    mapbox::util::apply_visitor(StencilModeVisitor{desc}, stencilMode.test);
+     MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "applyStencilMode");
+    mapbox::util::apply_visitor(StencilModeVisitor, stencilMode.test);
 
     desc->setStencilFailureOperation(mapOperation(stencilMode.fail));
     desc->setDepthFailureOperation(mapOperation(stencilMode.depthFail));
@@ -712,7 +712,7 @@ void applyStencilMode(const gfx::StencilMode& stencilMode, MTL::StencilDescripto
 MTLDepthStencilStatePtr Context::makeDepthStencilState(const gfx::DepthMode& depthMode,
     const gfx::StencilMode& stencilMode,
     const gfx::Renderable& renderable) const {
-    MBGL_DEBUG("Context::makeDepthStencilState");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::makeDepthStencilState");
     auto depthStencilDescriptor = safeCreate(NS::TransferPtr(MTL::DepthStencilDescriptor::alloc()->init()), "MTL::DepthStencilDescriptor");
     if (!depthStencilDescriptor) {
         return {};
@@ -751,7 +751,7 @@ MTLDepthStencilStatePtr Context::makeDepthStencilState(const gfx::DepthMode& dep
 }
 
 void Context::bindGlobalUniformBuffers(gfx::RenderPass& renderPass) const noexcept {
-    MBGL_DEBUG("Context::bindGlobalUniformBuffers");
+    MBGL_DEBUG_LOG(EventSeverity::Debug, Event::General, -1, "Context::bindGlobalUniformBuffers");
     for (size_t id = 0; id < globalUniformBuffers.allocatedSize(); id++) {
         const auto& globalUniformBuffer = globalUniformBuffers.get(id);
         if (!globalUniformBuffer) continue;
