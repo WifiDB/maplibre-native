@@ -1,5 +1,5 @@
-#include "mbgl/util/logging.hpp"
-#include "mbgl/mtl/context.hpp"
+#include <mbgl/util/logging.hpp>
+#include <mbgl/mtl/context.hpp>
 
 #include <mbgl/gfx/shader_registry.hpp>
 #include <mbgl/mtl/command_encoder.hpp>
@@ -70,28 +70,28 @@ Context::~Context() {
         this->backend.getThreadPool().runRenderJobs(true /* closeQueue */);
         this->performCleanup();
     
-      if(this->emptyVertexBuffer){
-            safeRelease(this->emptyVertexBuffer, "emptyVertexBuffer");
-      }
-       if(this->tileVertexBuffer){
-             safeRelease(this->tileVertexBuffer, "tileVertexBuffer");
+        if(this->emptyVertexBuffer){
+           safeRelease(this->emptyVertexBuffer, "emptyVertexBuffer");
         }
-      if(this->tileIndexBuffer){
-             safeRelease(this->tileIndexBuffer, "tileIndexBuffer");
-       }
-      if(this->clipMaskShader){
-         safeRelease(this->clipMaskShader, "clipMaskShader");
-      }
+        if(this->tileVertexBuffer){
+           safeRelease(this->tileVertexBuffer, "tileVertexBuffer");
+        }
+        if(this->tileIndexBuffer){
+            safeRelease(this->tileIndexBuffer, "tileIndexBuffer");
+        }
+        if(this->clipMaskShader){
+          safeRelease(this->clipMaskShader, "clipMaskShader");
+        }
         if(this->clipMaskDepthStencilState){
-          safeRelease(this->clipMaskDepthStencilState, "clipMaskDepthStencilState");
-      }
-        if(this->clipMaskPipelineState){
-          safeRelease(this->clipMaskPipelineState, "clipMaskPipelineState");
-      }
+           safeRelease(this->clipMaskDepthStencilState, "clipMaskDepthStencilState");
+        }
+       if(this->clipMaskPipelineState){
+            safeRelease(this->clipMaskPipelineState, "clipMaskPipelineState");
+        }
        if(this->clipMaskUniformsBuffer){
            if(*this->clipMaskUniformsBuffer){
-              safeRelease(*this->clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
-            }
+                safeRelease(*this->clipMaskUniformsBuffer, "clipMaskUniformsBuffer");
+           }
            this->clipMaskUniformsBuffer.reset();
        }
         
