@@ -1,3 +1,4 @@
+#include <mbgl/util/logging.hpp>
 #include <mbgl/mtl/renderer_backend.hpp>
 
 #include <mbgl/gfx/backend_scope.hpp>
@@ -40,25 +41,25 @@
 namespace mbgl {
 namespace mtl {
 
-     // Helper function to release a Metal object
-    template <typename T>
-    void safeRelease(T object, const char* name) {
-        if (object) {
-            [object release];
-            MBGL_DEBUG("RendererBackend: Released: %s", name);
-        }
+    // Helper function to release a Metal object
+template <typename T>
+void safeRelease(T* object, const char* name) {
+    if (object) {
+        [static_cast<NS::Object*>(object) release];
+        MBGL_DEBUG("RendererBackend: Released: %s", name);
     }
-    
-    // Helper function to track the creation of a metal object.
-    template <typename T>
-    T safeCreate(T object, const char* name){
-        if(!object){
-            MBGL_ERROR("RendererBackend: Failed to create: %s", name);
-        } else {
-          MBGL_DEBUG("RendererBackend: Created: %s", name);
-        }
-        return object;
+}
+
+// Helper function to track the creation of a metal object.
+template <typename T>
+NS::TransferPtr<T> safeCreate(T* object, const char* name){
+    if(!object){
+        MBGL_ERROR("RendererBackend: Failed to create: %s", name);
+    } else {
+        MBGL_DEBUG("RendererBackend: Created: %s", name);
     }
+    return NS::TransferPtr<T>::Adopt(object); // Use Adopt to take ownership
+}
 
 RendererBackend::RendererBackend(const gfx::ContextMode contextMode_)
     : gfx::RendererBackend(contextMode_) {
@@ -87,12 +88,8 @@ RendererBackend::RendererBackend(const gfx::ContextMode contextMode_)
 
 RendererBackend::~RendererBackend() {
     MBGL_DEBUG("RendererBackend::~RendererBackend()");
-    if(commandQueue){
-        safeRelease(commandQueue, "MTLCommandQueue");
-    }
-    if(device){
-        safeRelease(device, "MTLDevice");
-    }
+    safeRelease(commandQueue.get(), "MTLCommandQueue"); // commandQueue is likely a NS::TransferPtr
+    safeRelease(device.get(), "MTLDevice");           // device is likely a NS::TransferPtr
 }
 
 std::unique_ptr<gfx::Context> RendererBackend::createContext() {

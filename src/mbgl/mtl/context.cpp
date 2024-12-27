@@ -1,5 +1,5 @@
-#include "mbgl/util/logging.hpp"
-#include "mbgl/mtl/context.hpp"
+#include <mbgl/util/logging.hpp?
+#include <mbgl/mtl/context.hpp>
 
 #include <mbgl/gfx/shader_registry.hpp>
 #include <mbgl/mtl/command_encoder.hpp>
@@ -72,12 +72,16 @@ Context::~Context() {
 
         safeRelease(this->emptyVertexBuffer.get(), "emptyVertexBuffer");
         if (this->tileVertexBuffer) {
-            safeRelease(*this->tileVertexBuffer, "tileVertexBuffer");
+            safeRelease(this->tileVertexBuffer->get(), "tileVertexBuffer");
         }
         if (this->tileIndexBuffer) {
-            safeRelease(*this->tileIndexBuffer, "tileIndexBuffer");
+            safeRelease(this->tileIndexBuffer->get(), "tileIndexBuffer");
         }
-        safeRelease(this->clipMaskShader.get(), "clipMaskShader");
+        if (this->clipMaskUniformsBuffer) {
+            safeRelease(this->clipMaskUniformsBuffer->get(), "clipMaskUniformsBuffer");
+            this->clipMaskUniformsBuffer.reset();
+        }
+        safeRelease(this->clipMaskShader.get(), "clipMaskShader"); // Assuming these are smart pointers
         safeRelease(this->clipMaskDepthStencilState.get(), "clipMaskDepthStencilState");
         safeRelease(this->clipMaskPipelineState.get(), "clipMaskPipelineState");
         if (this->clipMaskUniformsBuffer) {
