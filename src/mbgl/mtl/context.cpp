@@ -38,10 +38,8 @@ namespace mtl {
 template <typename T>
 void safeRelease(T* object, const char* name) { // Takes a pointer
     if (object) {
-        [object] { // Capture 'object' by value
-            [static_cast<NS::Object*>(object) release];
-            MBGL_DEBUG("Released: %s", name);
-        }(); // Immediately invoke the lambda
+        [static_cast<NS::Object*>(object) release];
+        MBGL_DEBUG("Released: %s", name);
     }
 }
 
