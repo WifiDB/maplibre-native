@@ -1,6 +1,6 @@
 {
-  "name": "@maplibre/maplibre-gl-native",
-  "version": "6.0.1-pre.0",
+  "name": "@acalcutt/maplibre-gl-native",
+  "version": "6.0.1-pre.7",
   "description": "Renders map tiles with MapLibre Native",
   "keywords": [
     "maplibre",
@@ -17,7 +17,7 @@
   "types": "index.d.ts",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maplibre/maplibre-native.git"
+    "url": "git+https://github.com/WifiDB/maplibre-native.git"
   },
   "license": "BSD-2-Clause",
   "dependencies": {
@@ -72,7 +72,7 @@
   "binary": {
     "module_name": "mbgl",
     "module_path": "./lib/{node_abi}",
-    "host": "https://github.com/maplibre/maplibre-native/releases/download/",
+    "host": "https://github.com/maplibre/WifiDB/releases/download/",
     "remote_path": "node-v{version}",
     "package_name": "{node_abi}-{platform}-{arch}-{configuration}.tar.gz"
   }
