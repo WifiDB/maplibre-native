@@ -65,8 +65,7 @@
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "MLN_WITH_NODE": "ON",
-        "MLN_WITH_WERROR": "OFF",
-        "MLN_CREATE_AUTORELEASEPOOL": "ON"
+        "MLN_WITH_WERROR": "OFF"
       }
     },
     {
