@@ -2,7 +2,7 @@ name: node-release
 
 on:
   push:
-    branches: [CREATE_AUTORELEASEPOOL]
+    branches: [node_arp_test]
   workflow_dispatch:
 
 jobs:

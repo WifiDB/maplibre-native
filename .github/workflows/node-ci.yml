@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - CREATE_AUTORELEASEPOOL
+      - node_arp_test
       - topic/drawable
       - node-*.*.x
     tags:
