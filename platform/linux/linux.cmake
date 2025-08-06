@@ -33,7 +33,6 @@ target_sources(
     PRIVATE
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/gfx/headless_backend.cpp
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/gfx/headless_frontend.cpp
-        ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/gl/headless_backend.cpp
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/i18n/collator.cpp
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/i18n/number_format.cpp
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/layermanager/layer_manager.cpp
@@ -71,8 +70,16 @@ target_sources(
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/util/thread_local.cpp
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/util/timer.cpp
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/util/utf.cpp
-        ${PROJECT_SOURCE_DIR}/platform/linux/src/gl_functions.cpp
 )
+
+if(MLN_WITH_OPENGL)
+    target_sources(
+        mbgl-core
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/gl/headless_backend.cpp
+            ${PROJECT_SOURCE_DIR}/platform/linux/src/gl_functions.cpp
+    )
+endif()
 
 if(MLN_WITH_EGL)
     find_package(OpenGL REQUIRED EGL)
@@ -177,6 +184,16 @@ target_link_libraries(
 # Bundle system provided libraries
 if(MLN_CORE_INCLUDE_DEPS AND NOT MLN_USE_BUILTIN_ICU AND NOT "${ARMERGE}" STREQUAL "ARMERGE-NOTFOUND")
     message(STATUS "Found armerge: ${ARMERGE}")
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/find_static_library.cmake)
+    find_static_library(PNG_STATIC_LIB NAMES png)
+    find_static_library(ZLIB_STATIC_LIB NAMES z)
+    find_static_library(JPEG_STATIC_LIB NAMES jpeg)
+    find_static_library(WEBP_STATIC_LIB NAMES webp)
+    find_static_library(CURL_STATIC_LIB NAMES curl)
+    find_static_library(UV_STATIC_LIB NAMES uv)
+    find_static_library(OPENSSL_STATIC_LIB NAMES ssl)
+    find_static_library(SQLITE_STATIC_LIB NAMES sqlite3)
+
     add_custom_command(
         TARGET mbgl-core
         POST_BUILD
@@ -185,6 +202,14 @@ if(MLN_CORE_INCLUDE_DEPS AND NOT MLN_USE_BUILTIN_ICU AND NOT "${ARMERGE}" STREQU
             ${ICUUC_LIBRARY_DIRS}/libicuuc.a
             ${ICUUC_LIBRARY_DIRS}/libicudata.a
             ${ICUI18N_LIBRARY_DIRS}/libicui18n.a
+            ${PNG_STATIC_LIB}
+            ${ZLIB_STATIC_LIB}
+            ${JPEG_STATIC_LIB}
+            ${WEBP_STATIC_LIB}
+            ${CURL_STATIC_LIB}
+            ${UV_STATIC_LIB}
+            ${OPENSSL_STATIC_LIB}
+            ${SQLITE_STATIC_LIB}
     )
 endif()
 
