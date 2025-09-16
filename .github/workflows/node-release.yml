@@ -9,6 +9,8 @@ jobs:
   release-check:
     name: Check if version is published
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     defaults:
       run:
         shell: bash
