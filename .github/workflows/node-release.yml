@@ -42,6 +42,14 @@ jobs:
           echo "isPrerelease: $isPrerelease"
           echo "packageName: $packageName"
 
+      - name: Create Git Tag
+        if: ${{ steps.check.outputs.published == 'false' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag node-v${{ steps.check.outputs.current-version }}
+          git push origin node-v${{ steps.check.outputs.current-version }}
+
       - name: Create release
         if: ${{ steps.check.outputs.published == 'false' }}
         id: create_release
@@ -54,7 +62,6 @@ jobs:
           allowUpdates: true
           draft: true
           prerelease: ${{ steps.check.outputs.is-prerelease == 'true' }}
-          commit: ${{ github.sha }}
 
     outputs:
       published: ${{ steps.check.outputs.published }}
