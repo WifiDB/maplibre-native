@@ -17,20 +17,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Use Node.js from nvmrc
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v4
-        with:
-          node-version-file: 'platform/node/.nvmrc'
-
       - name: Check if version is published
         id: check
         working-directory: platform/node
         run: |
+          packageName="$( node -e "console.log(require('./package.json').name)" )"
           currentVersion="$( node -e "console.log(require('./package.json').version)" )"
-          isPublished="$( npm view @acalcutt/maplibre-gl-native-test versions --json | jq -c --arg cv "$currentVersion" 'any(. == $cv)' )"
+          isPublished="$( npm view $packageName versions --json | jq -c --arg cv "$currentVersion" 'any(. == $cv)' )"
           echo "published=$isPublished" >> "$GITHUB_OUTPUT"
+          echo "current-version=$currentVersion" >> "$GITHUB_OUTPUT"
           echo "currentVersion: $currentVersion"
           echo "isPublished: $isPublished"
+          echo "packageName: $packageName"
+
+      - name: Create release
+        if: ${{ steps.check.outputs.published == 'false' }}
+        id: create_release
+        uses: ncipollo/release-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag: node-v${{ steps.check.outputs.current-version }}
+          name: node-v${{ steps.check.outputs.current-version }}
+          allowUpdates: true
+          draft: true
     outputs:
       published: ${{ steps.check.outputs.published }}
 
