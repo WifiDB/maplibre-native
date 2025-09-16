@@ -64,11 +64,13 @@ jobs:
         shell: bash
 
     steps:
+      - if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v4
         with:
           submodules: true
-          fetch-depth: 0
 
       - name: Get OS Architecture
         if: runner.os == 'MacOS' || runner.os == 'Linux'
@@ -125,12 +127,6 @@ jobs:
         run: |
           $env:PATH = $env:PATH -replace "C:\\Strawberry\\c\\bin;", ""
           "PATH=$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Setup cmake
-        if: ${{contains(runner.name, 'GitHub Actions')}}
-        uses: jwlawson/actions-setup-cmake@802fa1a2c4e212495c05bf94dba2704a92a472be # v2.0.2
-        with:
-          cmake-version: '3.31'
 
       - name: cmake version
         run: |
@@ -201,12 +197,15 @@ jobs:
       - name: Configure maplibre-native (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          VCPKG_INSTALL_OPTIONS: "--debug"
+          VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}\\platform\\windows\\vendor\\vcpkg\\archives,readwrite"
         run: |
           cmake . -B build `
             -G Ninja `
             -DCMAKE_BUILD_TYPE=${{ env.BUILDTYPE }} `
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
-            -DMLN_WITH_NODE=ON \
+            -DMLN_WITH_NODE=ON `
             -DMLN_WITH_OPENGL=ON
 
       - name: Build maplibre-native (MacOS/Linux)
@@ -219,25 +218,11 @@ jobs:
         run: |
           cmake --build build
 
-      - name: Publish X64 Release to Github
-        if: matrix.arch == 'x86_64'
+      - name: Prebuild and upload
         working-directory: platform/node
+        run: npm run prebuild -- --upload-all --tag node-v${{ steps.package-version.outputs.current-version }}
         env:
-          PUBLISH: true
-          BUILDTYPE: RelWithDebInfo
-          NODE_PRE_GYP_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          ./scripts/publish.sh
-
-      - name: Publish ARM Release to Github
-        if: matrix.arch == 'arm64'
-        working-directory: platform/node
-        env:
-          PUBLISH: true
-          BUILDTYPE: RelWithDebInfo
-          NODE_PRE_GYP_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          ./scripts/publish.sh --target_arch=arm64
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish_npm:
     runs-on: ubuntu-latest
@@ -250,8 +235,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v4
-        with:
-          fetch-depth: 0
 
       - name: Use Node.js from nvmrc
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v4
