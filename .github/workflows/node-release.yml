@@ -45,7 +45,7 @@ jobs:
       - name: Create release
         if: ${{ steps.check.outputs.published == 'false' }}
         id: create_release
-        uses: ncipollo/release-action@v1
+        uses: ncipollo/release-action@b7eabc95ff50cbeeedec83973935c8f306dfcd0b # v1.20.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -54,6 +54,8 @@ jobs:
           allowUpdates: true
           draft: true
           prerelease: ${{ steps.check.outputs.is-prerelease == 'true' }}
+          commit: ${{ github.sha }}
+
     outputs:
       published: ${{ steps.check.outputs.published }}
       current-version: ${{ steps.check.outputs.current-version }}
