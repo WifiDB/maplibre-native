@@ -279,13 +279,13 @@ jobs:
             tar -czf "$TARBALL_NAME" "$ABI_FOLDER/mbgl.node"
           done
 
-        - name: Upload Release Assets
-          uses: softprops/action-gh-release@v1
-          with:
-            tag_name: v${{ needs.release-check.outputs.current-version }}
-            files: platform/node/*.tar.gz
-          env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.release-check.outputs.current-version }}
+          files: platform/node/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish_npm:
     runs-on: ubuntu-latest
