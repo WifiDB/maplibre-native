@@ -262,15 +262,15 @@ jobs:
         working-directory: platform/node
         run: |
           for ABI_FOLDER in lib/node-v*; do
-            ABI="${ABI_FOLDER##*-}"
+            ABI="${ABI_FOLDER##*v}"
             
-            # Construct the filename for the tarball
-            TARBALL_NAME="${{ needs.release-check.outputs.package-name }}-v${{ needs.release-check.outputs.current-version }}-node-v${ABI}-${{ runner.os }}-${{ runner.arch }}.tar.gz"
+            # Construct the filename for the tarball, replacing @ and /
+            TARBALL_NAME="$(echo "${{ needs.release-check.outputs.package-name }}" | sed 's/@//g' | sed 's/\//-/g')-v${{ needs.release-check.outputs.current-version }}-node-v${ABI}-${{ runner.os.toLowerCase() }}-${{ runner.arch.toLowerCase() }}.tar.gz"
             
             echo "Creating tarball: $TARBALL_NAME from folder $ABI_FOLDER"
             
             # Create the compressed tarball
-            tar -czvf "$TARBALL_NAME" "$ABI_FOLDER/mbgl.node"
+            tar -czf "$TARBALL_NAME" "$ABI_FOLDER/mbgl.node"
             
             # Upload the tarball to the draft release
             curl --fail -X POST \
