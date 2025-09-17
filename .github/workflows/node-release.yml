@@ -258,7 +258,7 @@ jobs:
         run: |
           cmake --build build
 
-      - name: Upload prebuilt binaries to GitHub Release
+      - name: Create prebuilt binaries
         working-directory: platform/node
         run: |
           for ABI_FOLDER in lib/node-v*; do
@@ -277,14 +277,15 @@ jobs:
             
             # Create the compressed tarball
             tar -czf "$TARBALL_NAME" "$ABI_FOLDER/mbgl.node"
-            
-            # Upload the tarball to the draft release
-            curl --fail -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/gzip" \
-            --data-binary "@$TARBALL_NAME" \
-            "${{ needs.release-check.outputs.upload_url }}?name=$TARBALL_NAME"
           done
+
+        - name: Upload Release Assets
+          uses: softprops/action-gh-release@v1
+          with:
+            tag_name: v${{ needs.release-check.outputs.current-version }}
+            files: platform/node/*.tar.gz
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish_npm:
     runs-on: ubuntu-latest
