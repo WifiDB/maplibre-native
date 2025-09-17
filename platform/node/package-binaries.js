@@ -78,28 +78,25 @@ async function createTarballs() {
   for (const abiDir of abiDirs) {
     const abi = abiDir.replace('node-v', '');
     const tarballName = `${cleanName}-v${version}-node-v${abi}-${platform}-${arch}.tar.gz`;
-    const binaryPath = path.join(libDir, abiDir, 'mbgl.node');
-    const absBinaryPath = path.resolve(binaryPath);
+    const binaryPath = path.join('lib', abiDir, 'mbgl.node');
     
     console.log(`Creating tarball: ${tarballName}`);
     console.log(`  Platform: ${platform}, Arch: ${arch}, ABI: ${abi}`);
     console.log(`  Binary: ${binaryPath}`);
     
     try {
-      // Create tarball with binary at root level using tar library
+      // Create tarball preserving the lib/node-v[abi]/mbgl.node structure
       await tar.create({
         gzip: true,
         file: tarballName,
-        // Transform the path to put the binary at root level
-        transform: {
-          'mbgl.node': absBinaryPath
-        }
-      }, ['mbgl.node']);
+        cwd: '.', // Set current working directory
+      }, [binaryPath]);
       
       // Verify tarball contents
       console.log(`  Tarball contents:`);
       const contents = await tar.list({
-        file: tarballName
+        file: tarballName,
+        onentry: entry => console.log(`    ${entry.path}`)
       });
       
       createdTarballs.push(tarballName);
