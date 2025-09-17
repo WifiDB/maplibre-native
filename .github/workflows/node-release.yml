@@ -261,26 +261,42 @@ jobs:
       - name: Create prebuilt binaries
         working-directory: platform/node
         run: |
+          # Map GitHub Actions runner values to Node.js platform/arch values
+          case "${{ runner.os }}" in
+            "Linux") PLATFORM="linux" ;;
+            "macOS") PLATFORM="darwin" ;;  
+            "Windows") PLATFORM="win32" ;;
+          esac
+
+          case "${{ matrix.arch }}" in  
+            "x86_64") ARCH="x64" ;;
+            "arm64") ARCH="arm64" ;;
+            "x86") ARCH="ia32" ;;
+          esac
+
           for ABI_FOLDER in lib/node-v*; do
             ABI="${ABI_FOLDER##*v}"
             
-            # Convert to lowercase using tr (works on all systems)
-            OS_LOWER=$(echo "${{ runner.os }}" | tr '[:upper:]' '[:lower:]')
-            ARCH_LOWER=$(echo "${{ runner.arch }}" | tr '[:upper:]' '[:lower:]')
+            # prebuild-install naming convention: {name}-v{version}-{runtime}-v{abi}-{platform}-{arch}.tar.gz
+            # Convert @ and / in package name for filename compatibility
+            CLEAN_NAME="$(echo "${{ needs.release-check.outputs.package-name }}" | sed 's/@//g' | sed 's/\//-/g')"
+            TARBALL_NAME="${CLEAN_NAME}-v${{ needs.release-check.outputs.current-version }}-node-v${ABI}-${PLATFORM}-${ARCH}.tar.gz"
             
-            # Construct the filename for the tarball, replacing @ and /
-            TARBALL_NAME="$(echo "${{ needs.release-check.outputs.package-name }}" | sed 's/@//g' | sed 's/\//-/g')-v${{ needs.release-check.outputs.current-version }}-node-v${ABI}-${OS_LOWER}-${ARCH_LOWER}.tar.gz"
+            echo "Creating tarball: $TARBALL_NAME"
+            echo "Platform: ${PLATFORM}, Arch: ${ARCH}, ABI: ${ABI}"
             
-            echo "Creating tarball: $TARBALL_NAME from folder $ABI_FOLDER"
+            # Create tarball with binary at root level (prebuild-install expects this structure)
+            tar -czf "$TARBALL_NAME" -C "$ABI_FOLDER" mbgl.node
             
-            # Create the compressed tarball
-            tar -czf "$TARBALL_NAME" "$ABI_FOLDER/mbgl.node"
+            # Verify the tarball contents
+            echo "Tarball contents:"
+            tar -tzf "$TARBALL_NAME"
           done
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ needs.release-check.outputs.current-version }}
+          tag_name: node-v${{ needs.release-check.outputs.current-version }}
           files: platform/node/*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
