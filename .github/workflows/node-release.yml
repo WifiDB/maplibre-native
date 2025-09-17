@@ -264,11 +264,9 @@ jobs:
           for ABI_FOLDER in lib/node-v*; do
             ABI="${ABI_FOLDER##*v}"
             
-            # Convert to lowercase using bash parameter expansion
-            OS_LOWER="${{ runner.os }}"
-            OS_LOWER="${OS_LOWER,,}"
-            ARCH_LOWER="${{ runner.arch }}"
-            ARCH_LOWER="${ARCH_LOWER,,}"
+            # Convert to lowercase using tr (works on all systems)
+            OS_LOWER=$(echo "${{ runner.os }}" | tr '[:upper:]' '[:lower:]')
+            ARCH_LOWER=$(echo "${{ runner.arch }}" | tr '[:upper:]' '[:lower:]')
             
             # Construct the filename for the tarball, replacing @ and /
             TARBALL_NAME="$(echo "${{ needs.release-check.outputs.package-name }}" | sed 's/@//g' | sed 's/\//-/g')-v${{ needs.release-check.outputs.current-version }}-node-v${ABI}-${OS_LOWER}-${ARCH_LOWER}.tar.gz"
