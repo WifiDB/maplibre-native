@@ -265,7 +265,7 @@ jobs:
             ABI="${ABI_FOLDER##*-}"
             
             # Construct the filename for the tarball
-            TARBALL_NAME="${{ needs.release-check.outputs.package-name }}-v${{ needs.release-check.outputs.current-version }}-node-v${ABI}-${{ runner.os.toLowerCase() }}-${{ runner.arch }}.tar.gz"
+            TARBALL_NAME="${{ needs.release-check.outputs.package-name }}-v${{ needs.release-check.outputs.current-version }}-node-v${ABI}-${{ runner.os }}-${{ runner.arch }}.tar.gz"
             
             echo "Creating tarball: $TARBALL_NAME from folder $ABI_FOLDER"
             
