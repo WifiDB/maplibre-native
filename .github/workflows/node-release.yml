@@ -32,15 +32,19 @@ jobs:
         run: |
           packageName="$( node -e "console.log(require('./package.json').name)" )"
           currentVersion="$( node -e "console.log(require('./package.json').version)" )"
+          abi="$(node -e "console.log(process.versions.modules)")"
           isPublished="$( npm view $packageName versions --json | jq -c --arg cv "$currentVersion" 'any(. == $cv)' )"
           isPrerelease="$( node -e "console.log(require('semver').prerelease('$currentVersion') ? 'true' : 'false')" )"
           echo "published=$isPublished" >> "$GITHUB_OUTPUT"
           echo "current-version=$currentVersion" >> "$GITHUB_OUTPUT"
           echo "is-prerelease=$isPrerelease" >> "$GITHUB_OUTPUT"
+          echo "abi=$abi" >> "$GITHUB_OUTPUT"
+          echo "package-name=$packageName" >> "$GITHUB_OUTPUT"
           echo "currentVersion: $currentVersion"
           echo "isPublished: $isPublished"
           echo "isPrerelease: $isPrerelease"
           echo "packageName: $packageName"
+          echo "abi: $abi"
 
       - name: Create Git Tag
         if: ${{ steps.check.outputs.published == 'false' }}
@@ -67,6 +71,8 @@ jobs:
       published: ${{ steps.check.outputs.published }}
       current-version: ${{ steps.check.outputs.current-version }}
       is-prerelease: ${{ steps.check.outputs.is-prerelease }}
+      abi: ${{ steps.check.outputs.abi }}
+      package-name: ${{ steps.check.outputs.package-name }}
 
   publish_binaries:
     needs: release-check
@@ -252,11 +258,20 @@ jobs:
         run: |
           cmake --build build
 
-      - name: Prebuild and upload
+      - name: Create the prebuild package
         working-directory: platform/node
-        run: npm run prebuild -- --upload-all --tag node-v${{ needs.release-check.outputs.current-version }}
+        run: |
+          tar -czvf "${{ needs.release-check.outputs.package-name }}-v${{ needs.release-check.outputs.current-version }}-node-v${{ needs.release-check.outputs.abi }}-${{ runner.os | downcase }}-${{ runner.arch }}.tar.gz" "lib/node-v${{ needs.release-check.outputs.abi }}/mbgl.node"
+
+      - name: Upload prebuilt binary to GitHub Release
+        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.release-check.outputs.upload_url }}
+          asset_path: platform/node/${{ needs.release-check.outputs.package-name }}-v${{ needs.release-check.outputs.current-version }}-node-v${{ needs.release-check.outputs.abi }}-${{ runner.os | downcase }}-${{ runner.arch }}.tar.gz
+          asset_name: ${{ needs.release-check.outputs.package-name }}-v${{ needs.release-check.outputs.current-version }}-node-v${{ needs.release-check.outputs.abi }}-${{ runner.os | downcase }}-${{ runner.arch }}.tar.gz
+          asset_content_type: application/gzip
 
   publish_npm:
     runs-on: ubuntu-latest
