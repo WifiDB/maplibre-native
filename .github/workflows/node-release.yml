@@ -43,6 +43,14 @@ jobs:
           echo "isPrerelease: $isPrerelease"
           echo "packageName: $packageName"
 
+      - name: Create Git Tag
+        if: ${{ steps.check.outputs.published == 'false' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag node-v${{ steps.check.outputs.current-version }}
+          git push origin node-v${{ steps.check.outputs.current-version }}
+
     outputs:
       published: ${{ steps.check.outputs.published }}
       current-version: ${{ steps.check.outputs.current-version }}
@@ -241,6 +249,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: node-v${{ needs.release-check.outputs.current-version }}
+          name: node-v${{ needs.release-check.outputs.current-version }}
           files: platform/node/*.tar.gz
           draft: true
           prerelease: ${{ needs.release-check.outputs.prerelease == 'true' }}
