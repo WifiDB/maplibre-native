@@ -88,9 +88,7 @@ function createTarballs() {
     try {
       // Create tarball with binary at root level
       // Using tar command for consistency with existing workflow
-      const command = process.platform === 'win32' 
-        ? `tar -czf "${tarballName}" -C "${path.join(libDir, abiDir)}" mbgl.node`
-        : `tar -czf "${tarballName}" -C "${libDir}/${abiDir}" mbgl.node`;
+      const command = `tar -czf "${tarballName}" "${binaryPath}"`;
       
       execSync(command, { stdio: 'inherit' });
       
