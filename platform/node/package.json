@@ -58,8 +58,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "install": "prebuild-install --force || echo 'pre-compiled binary not found, please build from source'",
-    "prebuild": "prebuild --all --no-embed-source",
+    "install": "prebuild-install --force --tag-prefix 'node-v'|| echo 'pre-compiled binary not found, please build from source'",
     "test": "tape test/js/**/*.test.js",
     "test-memory": "node --expose-gc test/memory.test.js",
     "test-expressions": "node -r esm test/expression.test.js",
