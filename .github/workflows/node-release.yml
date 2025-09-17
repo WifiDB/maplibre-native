@@ -261,13 +261,11 @@ jobs:
       - name: Upload prebuilt binaries to GitHub Release
         working-directory: platform/node
         run: |
-          # The shell globbing pattern will find all the 'node-v[abi]' folders
           for ABI_FOLDER in lib/node-v*; do
-            # Extract the ABI number from the folder name
             ABI="${ABI_FOLDER##*-}"
             
             # Construct the filename for the tarball
-            TARBALL_NAME="${{ needs.release-check.outputs.package-name }}-v${{ needs.release-check.outputs.current-version }}-node-v${ABI}-${{ runner.os | downcase }}-${{ runner.arch }}.tar.gz"
+            TARBALL_NAME="${{ needs.release-check.outputs.package-name }}-v${{ needs.release-check.outputs.current-version }}-node-v${ABI}-${{ runner.os.toLowerCase() }}-${{ runner.arch }}.tar.gz"
             
             echo "Creating tarball: $TARBALL_NAME from folder $ABI_FOLDER"
             
