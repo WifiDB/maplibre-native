@@ -258,20 +258,29 @@ jobs:
         run: |
           cmake --build build
 
-      - name: Create the prebuild package
+      - name: Upload prebuilt binaries to GitHub Release
         working-directory: platform/node
         run: |
-          tar -czvf "${{ needs.release-check.outputs.package-name }}-v${{ needs.release-check.outputs.current-version }}-node-v${{ needs.release-check.outputs.abi }}-${{ runner.os | downcase }}-${{ runner.arch }}.tar.gz" "lib/node-v${{ needs.release-check.outputs.abi }}/mbgl.node"
-
-      - name: Upload prebuilt binary to GitHub Release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.release-check.outputs.upload_url }}
-          asset_path: platform/node/${{ needs.release-check.outputs.package-name }}-v${{ needs.release-check.outputs.current-version }}-node-v${{ needs.release-check.outputs.abi }}-${{ runner.os | downcase }}-${{ runner.arch }}.tar.gz
-          asset_name: ${{ needs.release-check.outputs.package-name }}-v${{ needs.release-check.outputs.current-version }}-node-v${{ needs.release-check.outputs.abi }}-${{ runner.os | downcase }}-${{ runner.arch }}.tar.gz
-          asset_content_type: application/gzip
+          # The shell globbing pattern will find all the 'node-v[abi]' folders
+          for ABI_FOLDER in lib/node-v*; do
+            # Extract the ABI number from the folder name
+            ABI="${ABI_FOLDER##*-}"
+            
+            # Construct the filename for the tarball
+            TARBALL_NAME="${{ needs.release-check.outputs.package-name }}-v${{ needs.release-check.outputs.current-version }}-node-v${ABI}-${{ runner.os | downcase }}-${{ runner.arch }}.tar.gz"
+            
+            echo "Creating tarball: $TARBALL_NAME from folder $ABI_FOLDER"
+            
+            # Create the compressed tarball
+            tar -czvf "$TARBALL_NAME" "$ABI_FOLDER/mbgl.node"
+            
+            # Upload the tarball to the draft release
+            curl --fail -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/gzip" \
+            --data-binary "@$TARBALL_NAME" \
+            "${{ needs.release-check.outputs.upload_url }}?name=$TARBALL_NAME"
+          done
 
   publish_npm:
     runs-on: ubuntu-latest
