@@ -35,9 +35,15 @@ function getArch() {
   }
 }
 
-// Clean package name for filename (remove @ and /)
+// Clean package name for filename
 function cleanPackageName(name) {
-  return name.replace(/[@\/]/g, '-');
+  let cleanName = name;
+  // If it's a scoped package, get the part after the last slash
+  if (cleanName.includes('/')) {
+    cleanName = cleanName.split('/').pop();
+  }
+  // Sanitize the name by removing all @ and / characters
+  return cleanName.replace(/[@\/]/g, '-');
 }
 
 // Create tarballs for each ABI
@@ -45,6 +51,7 @@ function createTarballs() {
   const platform = getPlatform();
   const arch = getArch();
   const version = packageJson.version;
+  // Use the updated cleaning function
   const cleanName = cleanPackageName(packageJson.name);
   
   console.log(`Creating tarballs for platform: ${platform}, arch: ${arch}, version: ${version}`);

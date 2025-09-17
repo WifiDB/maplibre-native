@@ -258,7 +258,7 @@ jobs:
         run: |
           cmake --build build
 
-      - name: Create prebuilt binaries
+      - name: Create prebuilt binary tarballs
         working-directory: platform/node
         run: npm run package-binaries
 
