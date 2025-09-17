@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const tar = require('tar');
 
 // Read package.json
 const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
@@ -47,11 +47,10 @@ function cleanPackageName(name) {
 }
 
 // Create tarballs for each ABI
-function createTarballs() {
+async function createTarballs() {
   const platform = getPlatform();
   const arch = getArch();
   const version = packageJson.version;
-  // Use the updated cleaning function
   const cleanName = cleanPackageName(packageJson.name);
   
   console.log(`Creating tarballs for platform: ${platform}, arch: ${arch}, version: ${version}`);
@@ -80,22 +79,28 @@ function createTarballs() {
     const abi = abiDir.replace('node-v', '');
     const tarballName = `${cleanName}-v${version}-node-v${abi}-${platform}-${arch}.tar.gz`;
     const binaryPath = path.join(libDir, abiDir, 'mbgl.node');
+    const absBinaryPath = path.resolve(binaryPath);
     
     console.log(`Creating tarball: ${tarballName}`);
     console.log(`  Platform: ${platform}, Arch: ${arch}, ABI: ${abi}`);
     console.log(`  Binary: ${binaryPath}`);
     
     try {
-      // Create tarball with binary at root level
-      // Using tar command for consistency with existing workflow
-      const command = `tar -czf "${tarballName}" "${binaryPath}"`;
-      
-      execSync(command, { stdio: 'inherit' });
+      // Create tarball with binary at root level using tar library
+      await tar.create({
+        gzip: true,
+        file: tarballName,
+        // Transform the path to put the binary at root level
+        transform: {
+          'mbgl.node': absBinaryPath
+        }
+      }, ['mbgl.node']);
       
       // Verify tarball contents
       console.log(`  Tarball contents:`);
-      const listCommand = `tar -tzf "${tarballName}"`;
-      execSync(listCommand, { stdio: 'inherit' });
+      const contents = await tar.list({
+        file: tarballName
+      });
       
       createdTarballs.push(tarballName);
       
@@ -113,12 +118,10 @@ function createTarballs() {
 
 // Main execution
 if (require.main === module) {
-  try {
-    createTarballs();
-  } catch (error) {
+  createTarballs().catch(error => {
     console.error('Error creating tarballs:', error);
     process.exit(1);
-  }
+  });
 }
 
 module.exports = { createTarballs, getPlatform, getArch, cleanPackageName };
