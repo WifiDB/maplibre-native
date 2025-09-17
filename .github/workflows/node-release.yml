@@ -260,38 +260,7 @@ jobs:
 
       - name: Create prebuilt binaries
         working-directory: platform/node
-        run: |
-          # Map GitHub Actions runner values to Node.js platform/arch values
-          case "${{ runner.os }}" in
-            "Linux") PLATFORM="linux" ;;
-            "macOS") PLATFORM="darwin" ;;  
-            "Windows") PLATFORM="win32" ;;
-          esac
-
-          case "${{ matrix.arch }}" in  
-            "x86_64") ARCH="x64" ;;
-            "arm64") ARCH="arm64" ;;
-            "x86") ARCH="ia32" ;;
-          esac
-
-          for ABI_FOLDER in lib/node-v*; do
-            ABI="${ABI_FOLDER##*v}"
-            
-            # prebuild-install naming convention: {name}-v{version}-{runtime}-v{abi}-{platform}-{arch}.tar.gz
-            # Convert @ and / in package name for filename compatibility
-            CLEAN_NAME="$(echo "${{ needs.release-check.outputs.package-name }}" | sed 's/@//g' | sed 's/\//-/g')"
-            TARBALL_NAME="${CLEAN_NAME}-v${{ needs.release-check.outputs.current-version }}-node-v${ABI}-${PLATFORM}-${ARCH}.tar.gz"
-            
-            echo "Creating tarball: $TARBALL_NAME"
-            echo "Platform: ${PLATFORM}, Arch: ${ARCH}, ABI: ${ABI}"
-            
-            # Create tarball with binary at root level (prebuild-install expects this structure)
-            tar -czf "$TARBALL_NAME" -C "$ABI_FOLDER" mbgl.node
-            
-            # Verify the tarball contents
-            echo "Tarball contents:"
-            tar -tzf "$TARBALL_NAME"
-          done
+        run: npm run package-binaries
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1

@@ -59,6 +59,7 @@
   },
   "scripts": {
     "install": "prebuild-install --force --tag-prefix 'node-v'|| echo 'pre-compiled binary not found, please build from source'",
+    "package-binaries": "node package-binaries.js",
     "test": "tape test/js/**/*.test.js",
     "test-memory": "node --expose-gc test/memory.test.js",
     "test-expressions": "node -r esm test/expression.test.js",
