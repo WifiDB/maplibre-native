@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-
 const fs = require('fs');
 const path = require('path');
 const tar = require('tar');
@@ -52,9 +51,9 @@ async function createTarballs() {
   const arch = getArch();
   const version = packageJson.version;
   const cleanName = cleanPackageName(packageJson.name);
-  
+
   console.log(`Creating tarballs for platform: ${platform}, arch: ${arch}, version: ${version}`);
-  
+
   // Find all ABI directories
   const libDir = './lib';
   if (!fs.existsSync(libDir)) {
@@ -79,11 +78,11 @@ async function createTarballs() {
     const abi = abiDir.replace('node-v', '');
     const tarballName = `${cleanName}-v${version}-node-v${abi}-${platform}-${arch}.tar.gz`;
     const binaryPath = path.join('lib', abiDir, 'mbgl.node');
-    
+
     console.log(`Creating tarball: ${tarballName}`);
     console.log(`  Platform: ${platform}, Arch: ${arch}, ABI: ${abi}`);
     console.log(`  Binary: ${binaryPath}`);
-    
+
     try {
       // Create tarball preserving the lib/node-v[abi]/mbgl.node structure
       await tar.create({
@@ -91,16 +90,14 @@ async function createTarballs() {
         file: tarballName,
         cwd: '.', // Set current working directory
       }, [binaryPath]);
-      
-      // Verify tarball contents
-      console.log(`  Tarball contents:`);
-      const contents = await tar.list({
-        file: tarballName,
-        onentry: entry => console.log(`    ${entry.path}`)
-      });
-      
+
+      // Verify tarball was created and get its size
+      const stats = fs.statSync(tarballName);
+      console.log(`  Tarball created successfully (${stats.size} bytes)`);
+      if (stats.size === 0) {
+        throw new Error('Tarball is empty');
+      }
       createdTarballs.push(tarballName);
-      
     } catch (error) {
       console.error(`Failed to create tarball ${tarballName}:`, error.message);
       process.exit(1);
@@ -108,17 +105,25 @@ async function createTarballs() {
   }
   
   console.log(`\nSuccessfully created ${createdTarballs.length} tarballs:`);
-  createdTarballs.forEach(tarball => console.log(`  ${tarball}`));
+  createdTarballs.forEach(tarball => {
+    const stats = fs.statSync(tarball);
+    console.log(`  ${tarball} (${stats.size} bytes)`);
+  });
   
   return createdTarballs;
 }
 
 // Main execution
 if (require.main === module) {
-  createTarballs().catch(error => {
-    console.error('Error creating tarballs:', error);
-    process.exit(1);
-  });
+  createTarballs()
+    .then(() => {
+      console.log('Tarball creation completed successfully');
+      process.exit(0); // Explicitly exit with success
+    })
+    .catch(error => {
+      console.error('Error creating tarballs:', error);
+      process.exit(1);
+    });
 }
 
 module.exports = { createTarballs, getPlatform, getArch, cleanPackageName };
