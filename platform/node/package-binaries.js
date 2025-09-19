@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 const fs = require('fs');
 const path = require('path');
 const tar = require('tar');
@@ -10,10 +11,13 @@ const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 function getPlatform() {
   // Use Node.js built-in process.platform
   switch (process.platform) {
-    case 'linux': return 'linux';
-    case 'darwin': return 'darwin';
-    case 'win32': return 'win32';
-    default: 
+    case 'linux':
+      return 'linux';
+    case 'darwin':
+      return 'darwin';
+    case 'win32':
+      return 'win32';
+    default:
       console.warn(`Unknown platform: ${process.platform}, using as-is`);
       return process.platform;
   }
@@ -22,12 +26,18 @@ function getPlatform() {
 function getArch() {
   // Use Node.js built-in process.arch
   switch (process.arch) {
-    case 'x64': return 'x64';
-    case 'arm64': return 'arm64';
-    case 'ia32': return 'ia32';
-    case 'arm': return 'arm';
-    case 's390x': return 's390x';
-    case 'ppc64': return 'ppc64';
+    case 'x64':
+      return 'x64';
+    case 'arm64':
+      return 'arm64';
+    case 'ia32':
+      return 'ia32';
+    case 'arm':
+      return 'arm';
+    case 's390x':
+      return 's390x';
+    case 'ppc64':
+      return 'ppc64';
     default:
       console.warn(`Unknown architecture: ${process.arch}, using as-is`);
       return process.arch;
@@ -60,20 +70,20 @@ async function createTarballs() {
     console.error(`lib directory not found: ${libDir}`);
     process.exit(1);
   }
-  
+
   const abiDirs = fs.readdirSync(libDir)
     .filter(dir => dir.startsWith('node-v') && fs.statSync(path.join(libDir, dir)).isDirectory())
     .filter(dir => fs.existsSync(path.join(libDir, dir, 'mbgl.node')));
-  
+
   if (abiDirs.length === 0) {
     console.error('No ABI directories with mbgl.node found');
     process.exit(1);
   }
-  
+
   console.log(`Found ABI directories: ${abiDirs.join(', ')}`);
-  
+
   const createdTarballs = [];
-  
+
   for (const abiDir of abiDirs) {
     const abi = abiDir.replace('node-v', '');
     const tarballName = `${cleanName}-v${version}-node-v${abi}-${platform}-${arch}.tar.gz`;
@@ -88,7 +98,7 @@ async function createTarballs() {
       await tar.create({
         gzip: true,
         file: tarballName,
-        cwd: '.', // Set current working directory
+        cwd: '.',
       }, [binaryPath]);
 
       // Verify tarball was created and get its size
@@ -103,13 +113,11 @@ async function createTarballs() {
       process.exit(1);
     }
   }
-  
   console.log(`\nSuccessfully created ${createdTarballs.length} tarballs:`);
   createdTarballs.forEach(tarball => {
     const stats = fs.statSync(tarball);
     console.log(`  ${tarball} (${stats.size} bytes)`);
   });
-  
   return createdTarballs;
 }
 
@@ -118,7 +126,7 @@ if (require.main === module) {
   createTarballs()
     .then(() => {
       console.log('Tarball creation completed successfully');
-      process.exit(0); // Explicitly exit with success
+      process.exit(0);
     })
     .catch(error => {
       console.error('Error creating tarballs:', error);
@@ -126,4 +134,9 @@ if (require.main === module) {
     });
 }
 
-module.exports = { createTarballs, getPlatform, getArch, cleanPackageName };
+module.exports = {
+  createTarballs,
+  getPlatform,
+  getArch,
+  cleanPackageName
+};
