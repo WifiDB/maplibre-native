@@ -2,7 +2,7 @@ name: node-release
 
 on:
   push:
-    branches: [main]
+    branches: [prebuild-test]
   workflow_dispatch:
 
 jobs:
