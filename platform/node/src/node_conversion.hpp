@@ -1,10 +1,6 @@
 #pragma once
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#pragma GCC diagnostic ignored "-Wshadow"
-#include <nan.h>
-#pragma GCC diagnostic pop
+#include <napi.h>
 
 #include <mbgl/util/feature.hpp>
 #include <mbgl/style/conversion/geojson.hpp>
@@ -15,60 +11,44 @@ namespace style {
 namespace conversion {
 
 template <>
-class ConversionTraits<v8::Local<v8::Value>> {
+class ConversionTraits<Napi::Value> {
 public:
-    static bool isUndefined(const v8::Local<v8::Value>& value) {
-        Nan::HandleScope scope;
-        return value->IsUndefined() || value->IsNull();
+    static bool isUndefined(const Napi::Value& value) {
+        return value.IsUndefined() || value.IsNull();
     }
 
-    static bool isArray(const v8::Local<v8::Value>& value) {
-        Nan::HandleScope scope;
-        return value->IsArray();
+    static bool isArray(const Napi::Value& value) {
+        return value.IsArray();
     }
 
-    static std::size_t arrayLength(const v8::Local<v8::Value>& value) {
-        Nan::HandleScope scope;
-        // const_cast because v8::Local<T>::As is not marked const until node v8.0
-        v8::Local<v8::Array> array = const_cast<v8::Local<v8::Value>&>(value).As<v8::Array>();
-        return array->Length();
+    static std::size_t arrayLength(const Napi::Value& value) {
+        return value.As<Napi::Array>().Length();
     }
 
-    static v8::Local<v8::Value> arrayMember(const v8::Local<v8::Value>& value, std::size_t i) {
-        Nan::EscapableHandleScope scope;
-        // const_cast because v8::Local<T>::As is not marked const until node v8.0
-        v8::Local<v8::Array> array = const_cast<v8::Local<v8::Value>&>(value).As<v8::Array>();
-        return scope.Escape(Nan::Get(array, static_cast<uint32_t>(i)).ToLocalChecked());
+    static Napi::Value arrayMember(const Napi::Value& value, std::size_t i) {
+        return value.As<Napi::Array>().Get(static_cast<uint32_t>(i));
     }
 
-    static bool isObject(const v8::Local<v8::Value>& value) {
-        Nan::HandleScope scope;
-        return value->IsObject() && !value->IsArray();
+    static bool isObject(const Napi::Value& value) {
+        return value.IsObject() && !value.IsArray();
     }
 
-    static std::optional<v8::Local<v8::Value>> objectMember(const v8::Local<v8::Value>& value, const char* name) {
-        Nan::EscapableHandleScope scope;
-        if (!Nan::Has(Nan::To<v8::Object>(value).ToLocalChecked(), Nan::New(name).ToLocalChecked()).FromJust()) {
+    static std::optional<Napi::Value> objectMember(const Napi::Value& value, const char* name) {
+        Napi::Object obj = value.As<Napi::Object>();
+        if (!obj.Has(name)) {
             return {};
         }
-        Nan::MaybeLocal<v8::Value> result = Nan::Get(Nan::To<v8::Object>(value).ToLocalChecked(),
-                                                     Nan::New(name).ToLocalChecked());
-        if (result.IsEmpty()) {
-            return {};
-        }
-        return {scope.Escape(result.ToLocalChecked())};
+        return { obj.Get(name) };
     }
 
     template <class Fn>
-    static std::optional<Error> eachMember(const v8::Local<v8::Value>& value, Fn&& fn) {
-        Nan::HandleScope scope;
-        v8::Local<v8::Array> names =
-            Nan::GetOwnPropertyNames(Nan::To<v8::Object>(value).ToLocalChecked()).ToLocalChecked();
-        for (uint32_t i = 0; i < names->Length(); ++i) {
-            v8::Local<v8::Value> k = Nan::Get(names, i).ToLocalChecked();
-            v8::Local<v8::Value> v = Nan::Get(Nan::To<v8::Object>(value).ToLocalChecked(), k).ToLocalChecked();
-            std::optional<Error> result = fn(*Nan::Utf8String(k),
-                                             std::move(v)); // NOLINT(performance-move-const-arg)
+    static std::optional<Error> eachMember(const Napi::Value& value, Fn&& fn) {
+        Napi::Object obj = value.As<Napi::Object>();
+        Napi::Array names = obj.GetPropertyNames();
+        for (uint32_t i = 0; i < names.Length(); ++i) {
+            Napi::Value k_val = names.Get(i);
+            Napi::Value v_val = obj.Get(k_val);
+            std::optional<Error> result = fn(k_val.As<Napi::String>().Utf8Value(), std::move(v_val));
             if (result) {
                 return result;
             }
@@ -76,63 +56,62 @@ public:
         return {};
     }
 
-    static std::optional<bool> toBool(const v8::Local<v8::Value>& value) {
-        Nan::HandleScope scope;
-        if (!value->IsBoolean()) {
+    static std::optional<bool> toBool(const Napi::Value& value) {
+        if (!value.IsBoolean()) {
             return {};
         }
-        return Nan::To<bool>(value).ToChecked();
+        return value.As<Napi::Boolean>().Value();
     }
 
-    static std::optional<float> toNumber(const v8::Local<v8::Value>& value) {
-        Nan::HandleScope scope;
-        if (!value->IsNumber()) {
+    static std::optional<float> toNumber(const Napi::Value& value) {
+        if (!value.IsNumber()) {
             return {};
         }
-        return static_cast<float>(Nan::To<double>(value).ToChecked());
+        return static_cast<float>(value.As<Napi::Number>().DoubleValue());
     }
 
-    static std::optional<double> toDouble(const v8::Local<v8::Value>& value) {
-        Nan::HandleScope scope;
-        if (!value->IsNumber()) {
+    static std::optional<double> toDouble(const Napi::Value& value) {
+        if (!value.IsNumber()) {
             return {};
         }
-        return Nan::To<double>(value).ToChecked();
+        return value.As<Napi::Number>().DoubleValue();
     }
 
-    static std::optional<std::string> toString(const v8::Local<v8::Value>& value) {
-        Nan::HandleScope scope;
-        if (!value->IsString()) {
+    static std::optional<std::string> toString(const Napi::Value& value) {
+        if (!value.IsString()) {
             return {};
         }
-        return std::string(*Nan::Utf8String(value));
+        return value.As<Napi::String>().Utf8Value();
     }
 
-    static std::optional<Value> toValue(const v8::Local<v8::Value>& value) {
-        if (value->IsFalse()) {
-            return {false};
-        } else if (value->IsTrue()) {
-            return {true};
-        } else if (value->IsString()) {
-            return {std::string(*Nan::Utf8String(value))};
-        } else if (value->IsUint32()) {
-            return {Nan::To<std::uint32_t>(value).ToChecked()};
-        } else if (value->IsInt32()) {
-            return {Nan::To<std::int32_t>(value).ToChecked()};
-        } else if (value->IsNumber()) {
-            return {Nan::To<double>(value).ToChecked()};
+    static std::optional<Value> toValue(const Napi::Value& value) {
+        if (value.IsBoolean()) {
+            return { value.As<Napi::Boolean>().Value() };
+        } else if (value.IsString()) {
+            return { value.As<Napi::String>().Utf8Value() };
+        } else if (value.IsNumber()) {
+            Napi::Number num = value.As<Napi::Number>();
+            double d = num.DoubleValue();
+            if (d == static_cast<std::uint32_t>(d)) {
+                return { static_cast<std::uint32_t>(d) };
+            } else if (d == static_cast<std::int32_t>(d)) {
+                return { static_cast<std::int32_t>(d) };
+            } else {
+                return { d };
+            }
         } else {
             return {};
         }
     }
-
-    static std::optional<GeoJSON> toGeoJSON(const v8::Local<v8::Value>& value, Error& error) {
+    
+    static std::optional<GeoJSON> toGeoJSON(const Napi::Value& value, Error& error) {
         try {
-            Nan::JSON NanJSON;
-            v8::Local<v8::Object> obj = Nan::To<v8::Object>(value).ToLocalChecked();
-            v8::Local<v8::String> stringified = NanJSON.Stringify(obj).ToLocalChecked();
-            std::string string = *Nan::Utf8String(stringified);
+            Napi::String stringified = Napi::JSON::Stringify(value.Env(), value.As<Napi::Object>());
+            std::string string = stringified.Utf8Value();
             return parseGeoJSON(string, error);
+        } catch (const Napi::Error& ex) {
+            error = {ex.what()};
+            return {};
         } catch (const std::exception& ex) {
             error = {ex.what()};
             return {};
@@ -141,7 +120,7 @@ public:
 };
 
 template <class T, class... Args>
-std::optional<T> convert(const v8::Local<v8::Value>& value, Error& error, Args&&... args) {
+std::optional<T> convert(const Napi::Value& value, Error& error, Args&&... args) {
     return convert<T>(Convertible(value), error, std::forward<Args>(args)...);
 }
 

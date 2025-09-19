@@ -51,7 +51,7 @@ endfunction()
 
 
 function(add_node_module NAME)
-    cmake_parse_arguments("" "" "MINIMUM_NODE_ABI;NAN_VERSION;INSTALL_PATH;CACHE_DIR" "EXCLUDE_NODE_ABIS" ${ARGN})
+    cmake_parse_arguments("" "" "MINIMUM_NODE_ABI;NODE_API_VERSION;INSTALL_PATH;CACHE_DIR" "EXCLUDE_NODE_ABIS" ${ARGN})
     if(NOT _MINIMUM_NODE_ABI)
         set(_MINIMUM_NODE_ABI "${NODE_MODULE_MINIMUM_ABI}")
     endif()
@@ -59,167 +59,126 @@ function(add_node_module NAME)
         set(_CACHE_DIR "${NODE_MODULE_CACHE_DIR}")
     endif()
     if (NOT _INSTALL_PATH)
-        set(_INSTALL_PATH "platform/node/lib/{node_abi}/${NAME}.node")
+        set(_INSTALL_PATH "platform/node/lib/${NAME}.node")
     endif()
     get_filename_component(_CACHE_DIR "${_CACHE_DIR}" REALPATH BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
     if(_UNPARSED_ARGUMENTS)
         message(WARNING "[Node.js] Unused arguments: '${_UNPARSED_ARGUMENTS}'")
     endif()
 
+    # Require NODE_API_VERSION
+    if(NOT _NODE_API_VERSION)
+        message(FATAL_ERROR "[Node.js] NODE_API_VERSION must be specified")
+    endif()
 
     # Create master target
     add_library(${NAME} INTERFACE)
 
+    # For Node-API, we only need to build for one representative Node.js version
+    # since the binary is ABI-stable across Node.js versions
+    set(_TARGET_NODE_VERSION "v18.20.4") # Use a stable LTS version with mature Node-API support
+    message(STATUS "[Node.js] Building Node-API ${_NODE_API_VERSION} module using Node.js ${_TARGET_NODE_VERSION} headers (ABI-stable)")
 
-    # Obtain a list of current Node versions and retrieves the latest version per ABI
-    if(NOT EXISTS "${_CACHE_DIR}/node/index.tab")
-        _node_module_download(
-            "Node.js version list"
-            "https://nodejs.org/dist/index.tab"
-            "${_CACHE_DIR}/node/index.tab"
-        )
-    endif()
-    file(STRINGS "${_CACHE_DIR}/node/index.tab" _INDEX_FILE)
-    list(REMOVE_AT _INDEX_FILE 0)
-    set(_ABIS)
-    foreach(_LINE IN LISTS _INDEX_FILE)
-        string(REGEX MATCHALL "[^\t]*\t" _COLUMNS "${_LINE}")
-        list(GET _COLUMNS 8 _ABI)
-        string(STRIP "${_ABI}" _ABI)
-        if((_ABI GREATER _MINIMUM_NODE_ABI OR _ABI EQUAL _MINIMUM_NODE_ABI) AND NOT _ABI IN_LIST _EXCLUDE_NODE_ABIS AND NOT DEFINED _NODE_ABI_${_ABI}_VERSION)
-            list(APPEND _ABIS ${_ABI})
-            list(GET _COLUMNS 0 _VERSION)
-            string(STRIP "${_VERSION}" _NODE_ABI_${_ABI}_VERSION)
-        endif()
-    endforeach()
-
-
-    # Install Nan
-    if(_NAN_VERSION AND NOT EXISTS "${_CACHE_DIR}/nan/${_NAN_VERSION}/nan.h")
+    # Download the Node.js headers if we don't have them yet
+    if(NOT EXISTS "${_CACHE_DIR}/node/${_TARGET_NODE_VERSION}/node.h")
         _node_module_unpack_tar_gz(
-            "Nan ${_NAN_VERSION}"
-            "https://registry.npmjs.org/nan/-/nan-${_NAN_VERSION}.tgz"
-            "package"
-            "${_CACHE_DIR}/nan/${_NAN_VERSION}"
+            "headers for Node ${_TARGET_NODE_VERSION}"
+            "https://nodejs.org/download/release/${_TARGET_NODE_VERSION}/node-${_TARGET_NODE_VERSION}-headers.tar.gz"
+            "node-${_TARGET_NODE_VERSION}/include/node"
+            "${_CACHE_DIR}/node/${_TARGET_NODE_VERSION}"
         )
     endif()
 
-
-    # Generate a target for every ABI
-    set(_TARGETS)
-    foreach(_ABI IN LISTS _ABIS)
-        set(_NODE_VERSION ${_NODE_ABI_${_ABI}_VERSION})
-
-        # Download the headers if we don't have them yet
-        if(NOT EXISTS "${_CACHE_DIR}/node/${_NODE_VERSION}/node.h")
-            _node_module_unpack_tar_gz(
-                "headers for Node ${_NODE_VERSION}"
-                "https://nodejs.org/download/release/${_NODE_VERSION}/node-${_NODE_VERSION}-headers.tar.gz"
-                "node-${_NODE_VERSION}/include/node"
-                "${_CACHE_DIR}/node/${_NODE_VERSION}"
-            )
-        endif()
-
-        if(WIN32)
-            if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-                set(_ARCH x64)
-            else()
-                set(_ARCH x86)
-            endif()
-
-            # Download the win-${_ARCH} libraries if we are compiling on Windows and don't have them yet
-            if(NOT EXISTS "${_CACHE_DIR}/lib/node/${_NODE_VERSION}/win-${_ARCH}/node.lib")
-                _node_module_download(
-                    "win-${_ARCH} library for Node ${_NODE_VERSION}"
-                    "https://nodejs.org/download/release/${_NODE_VERSION}/win-${_ARCH}/node.lib"
-                    "${_CACHE_DIR}/lib/node/${_NODE_VERSION}/win-${_ARCH}/node.lib"
-                )
-            endif()
-        endif()
-
-        # Generate the library
-        set(_TARGET "${NAME}.abi-${_ABI}")
-        add_library(${_TARGET} SHARED "${_CACHE_DIR}/empty.cpp")
-        list(APPEND _TARGETS "${_TARGET}")
-
-
-        # C identifiers can only contain certain characters (e.g. no dashes)
-        string(REGEX REPLACE "[^a-z0-9]+" "_" NAME_IDENTIFIER "${NAME}")
-
-        set_target_properties(${_TARGET} PROPERTIES
-            OUTPUT_NAME "${_TARGET}"
-            SOURCES "" # Removes the fake empty.cpp again
-            PREFIX ""
-            SUFFIX ".node"
-            MACOSX_RPATH ON
-            C_VISIBILITY_PRESET hidden
-            CXX_VISIBILITY_PRESET hidden
-            POSITION_INDEPENDENT_CODE TRUE
-        )
-
-        target_compile_definitions(${_TARGET} PRIVATE
-            "MODULE_NAME=${NAME_IDENTIFIER}"
-            "BUILDING_NODE_EXTENSION"
-            "_LARGEFILE_SOURCE"
-            "_FILE_OFFSET_BITS=64"
-        )
-
-        target_include_directories(${_TARGET} SYSTEM PRIVATE
-            "${_CACHE_DIR}/node/${_NODE_VERSION}"
-        )
-
-        if(_NAN_VERSION)
-            target_include_directories(${_TARGET} SYSTEM PRIVATE
-                "${_CACHE_DIR}/nan/${_NAN_VERSION}"
-            )
-        endif()
-
-        target_link_libraries(${_TARGET} PRIVATE ${NAME} mbgl-compiler-options)
-
-        if(WIN32)
-            target_include_directories(${_TARGET} SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/platform/windows/include")
-            target_compile_definitions(${_TARGET} PRIVATE NOMINMAX)
-            target_link_libraries(${_TARGET} PRIVATE "${_CACHE_DIR}/lib/node/${_NODE_VERSION}/win-${_ARCH}/node.lib")
-        endif()
-
-        if(APPLE)
-            # Ensures that linked symbols are loaded when the module is loaded instead of causing
-            # unresolved symbol errors later during runtime.
-            set_target_properties(${_TARGET} PROPERTIES
-                LINK_FLAGS "-undefined dynamic_lookup -bind_at_load"
-            )
-            target_compile_definitions(${_TARGET} PRIVATE
-                "_DARWIN_USE_64_BIT_INODE=1"
-            )
-        elseif(WIN32)
-            # Do nothing here
+    if(WIN32)
+        if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+            set(_ARCH x64)
         else()
-            # Ensures that linked symbols are loaded when the module is loaded instead of causing
-            # unresolved symbol errors later during runtime.
-            set_target_properties(${_TARGET} PROPERTIES
-                LINK_FLAGS "-z now"
+            set(_ARCH x86)
+        endif()
+
+        # Download the win-${_ARCH} libraries if we are compiling on Windows and don't have them yet
+        if(NOT EXISTS "${_CACHE_DIR}/lib/node/${_TARGET_NODE_VERSION}/win-${_ARCH}/node.lib")
+            _node_module_download(
+                "win-${_ARCH} library for Node ${_TARGET_NODE_VERSION}"
+                "https://nodejs.org/download/release/${_TARGET_NODE_VERSION}/win-${_ARCH}/node.lib"
+                "${_CACHE_DIR}/lib/node/${_TARGET_NODE_VERSION}/win-${_ARCH}/node.lib"
             )
         endif()
+    endif()
 
-        # Copy the file to the installation directory.
-        string(REPLACE "{node_abi}" "node-v${_ABI}" _OUTPUT_PATH "${_INSTALL_PATH}")
-        get_filename_component(_OUTPUT_PATH "${_OUTPUT_PATH}" ABSOLUTE "${CMAKE_CURRENT_SOURCE_PATH}")
-        add_custom_command(
-            TARGET ${_TARGET}
-            POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:${_TARGET}>" "${_OUTPUT_PATH}"
+    # Generate the Node-API library target
+    add_library(${NAME}.node SHARED "${_CACHE_DIR}/empty.cpp")
+
+    # C identifiers can only contain certain characters (e.g. no dashes)
+    string(REGEX REPLACE "[^a-z0-9]+" "_" NAME_IDENTIFIER "${NAME}")
+
+    set_target_properties(${NAME}.node PROPERTIES
+        OUTPUT_NAME "${NAME}"
+        SOURCES "" # Removes the fake empty.cpp again
+        PREFIX ""
+        SUFFIX ".node"
+        MACOSX_RPATH ON
+        C_VISIBILITY_PRESET hidden
+        CXX_VISIBILITY_PRESET hidden
+        POSITION_INDEPENDENT_CODE TRUE
+    )
+
+    target_compile_definitions(${NAME}.node PRIVATE
+        "MODULE_NAME=${NAME_IDENTIFIER}"
+        "BUILDING_NODE_EXTENSION"
+        "_LARGEFILE_SOURCE"
+        "_FILE_OFFSET_BITS=64"
+        "NAPI_VERSION=${_NODE_API_VERSION}"
+        "NAPI_CPP_EXCEPTIONS"
+    )
+
+    target_include_directories(${NAME}.node SYSTEM PRIVATE
+        "${_CACHE_DIR}/node/${_TARGET_NODE_VERSION}"
+    )
+
+    target_link_libraries(${NAME}.node PRIVATE ${NAME} mbgl-compiler-options)
+
+    if(WIN32)
+        target_include_directories(${NAME}.node SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/platform/windows/include")
+        target_compile_definitions(${NAME}.node PRIVATE NOMINMAX)
+        target_link_libraries(${NAME}.node PRIVATE "${_CACHE_DIR}/lib/node/${_TARGET_NODE_VERSION}/win-${_ARCH}/node.lib")
+    endif()
+
+    if(APPLE)
+        # Ensures that linked symbols are loaded when the module is loaded instead of causing
+        # unresolved symbol errors later during runtime.
+        set_target_properties(${NAME}.node PROPERTIES
+            LINK_FLAGS "-undefined dynamic_lookup -bind_at_load"
         )
+        target_compile_definitions(${NAME}.node PRIVATE
+            "_DARWIN_USE_64_BIT_INODE=1"
+        )
+    elseif(WIN32)
+        # Do nothing here
+    else()
+        # Ensures that linked symbols are loaded when the module is loaded instead of causing
+        # unresolved symbol errors later during runtime.
+        set_target_properties(${NAME}.node PROPERTIES
+            LINK_FLAGS "-z now"
+        )
+    endif()
 
-        if(WIN32)
-            unset(_ARCH)
-        endif()
-    endforeach()
+    # Copy the file to the installation directory.
+    get_filename_component(_OUTPUT_PATH "${_INSTALL_PATH}" ABSOLUTE "${CMAKE_CURRENT_SOURCE_PATH}")
+    add_custom_command(
+        TARGET ${NAME}.node
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:${NAME}.node>" "${_OUTPUT_PATH}"
+    )
 
-    # Add a target that builds all Node ABIs.
+    if(WIN32)
+        unset(_ARCH)
+    endif()
+
+    # Add a target that builds the Node-API module
     add_custom_target("${NAME}.all")
-    add_dependencies("${NAME}.all" ${_TARGETS})
+    add_dependencies("${NAME}.all" ${NAME}.node)
 
-    # Add a variable that allows users to iterate over all of the generated/dependendent targets.
-    set("${NAME}::abis" "${_ABIS}" PARENT_SCOPE)
-    set("${NAME}::targets" "${_TARGETS}" PARENT_SCOPE)
+    # Add variables for compatibility (though simpler now with single target)
+    set("${NAME}::targets" "${NAME}.node" PARENT_SCOPE)
 endfunction()

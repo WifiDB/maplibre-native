@@ -5,34 +5,35 @@
 #include <exception>
 #include <memory>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#pragma GCC diagnostic ignored "-Wshadow"
-#include <nan.h>
-#pragma GCC diagnostic pop
+#include <napi.h>
 
 namespace node_mbgl {
 
-v8::Local<v8::Value> toJS(const mbgl::style::expression::Value&);
+Napi::Value toJS(Napi::Env env, const mbgl::style::expression::Value&);
 
-class NodeExpression : public Nan::ObjectWrap {
+class NodeExpression : public Napi::ObjectWrap<NodeExpression> {
 public:
-    static void Init(v8::Local<v8::Object>);
+    static void Init(Napi::Env env, Napi::Object exports);
+    static Napi::Object NewInstance(Napi::Env env, std::unique_ptr<mbgl::style::expression::Expression> expression);
+
+    NodeExpression(const Napi::CallbackInfo& info);
 
 private:
-    NodeExpression(std::unique_ptr<mbgl::style::expression::Expression> expression_)
-        : expression(std::move(expression_)) {};
+    NodeExpression(Napi::Env env, std::unique_ptr<mbgl::style::expression::Expression> expression_);
 
-    static void New(const Nan::FunctionCallbackInfo<v8::Value>&);
-    static void Parse(const Nan::FunctionCallbackInfo<v8::Value>&);
-    static void Evaluate(const Nan::FunctionCallbackInfo<v8::Value>&);
-    static void GetType(const Nan::FunctionCallbackInfo<v8::Value>&);
-    static void IsFeatureConstant(const Nan::FunctionCallbackInfo<v8::Value>&);
-    static void IsZoomConstant(const Nan::FunctionCallbackInfo<v8::Value>&);
+    // Napi::ObjectWrap automatically handles construction via DefineClass
+    // The previous Nan::FunctionCallbackInfo<v8::Value> signatures are replaced
+    // with Napi::CallbackInfo
+    Napi::Value Evaluate(const Napi::CallbackInfo& info);
+    Napi::Value GetType(const Napi::CallbackInfo& info);
+    Napi::Value IsFeatureConstant(const Napi::CallbackInfo& info);
+    Napi::Value IsZoomConstant(const Napi::CallbackInfo& info);
+    Napi::Value Serialize(const Napi::CallbackInfo& info);
 
-    static void Serialize(const Nan::FunctionCallbackInfo<v8::Value>&);
+    // Static methods still need to be declared, but take the Napi::CallbackInfo
+    static void Parse(const Napi::CallbackInfo& info);
 
-    static Nan::Persistent<v8::Function> constructor;
+    static Napi::FunctionReference constructor;
 
     std::unique_ptr<mbgl::style::expression::Expression> expression;
 };

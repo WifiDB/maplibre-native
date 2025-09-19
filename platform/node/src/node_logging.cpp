@@ -1,5 +1,4 @@
 #include "node_logging.hpp"
-
 #include <mbgl/util/enum.hpp>
 
 namespace node_mbgl {
@@ -17,46 +16,34 @@ struct NodeLogObserver::LogMessage {
           text(std::move(text_)) {}
 };
 
-NodeLogObserver::NodeLogObserver(v8::Local<v8::Object> target)
-    : queue(new util::AsyncQueue<LogMessage>(uv_default_loop(), [this](LogMessage &message) {
-          Nan::HandleScope scope;
+NodeLogObserver::NodeLogObserver(Napi::Env env, Napi::Object target)
+    : env_(env),
+      module_(Napi::Persistent(target)),
+      queue(new util::AsyncQueue<LogMessage>(env, [this](LogMessage& message) {
+          Napi::HandleScope scope(env_);
+          Napi::Object msg = Napi::Object::New(env_);
 
-          auto msg = Nan::New<v8::Object>();
-
-          Nan::Set(msg,
-                   Nan::New("class").ToLocalChecked(),
-                   Nan::New(mbgl::Enum<mbgl::Event>::toString(message.event)).ToLocalChecked());
-
-          Nan::Set(msg,
-                   Nan::New("severity").ToLocalChecked(),
-                   Nan::New(mbgl::Enum<mbgl::EventSeverity>::toString(message.severity)).ToLocalChecked());
+          msg.Set("class", Napi::String::New(env_, mbgl::Enum<mbgl::Event>::toString(message.event)));
+          msg.Set("severity", Napi::String::New(env_, mbgl::Enum<mbgl::EventSeverity>::toString(message.severity)));
 
           if (message.code != -1) {
-              Nan::Set(msg, Nan::New("code").ToLocalChecked(), Nan::New<v8::Number>(message.code));
+              msg.Set("code", Napi::Number::New(env_, message.code));
           }
 
           if (!message.text.empty()) {
-              Nan::Set(msg, Nan::New("text").ToLocalChecked(), Nan::New(message.text).ToLocalChecked());
+              msg.Set("text", Napi::String::New(env_, message.text));
           }
 
-          v8::Local<v8::Value> argv[] = {Nan::New("message").ToLocalChecked(), msg};
-          auto handle = Nan::New<v8::Object>(module);
-          auto emit = Nan::To<v8::Object>(Nan::Get(handle, Nan::New("emit").ToLocalChecked()).ToLocalChecked())
-                          .ToLocalChecked();
-          Nan::CallAsFunction(emit, handle, 2, argv);
-      })) {
-    Nan::HandleScope scope;
-    module.Reset(target);
-
-    // Don't keep the event loop alive.
-    queue->unref();
-}
+          Napi::Object handle = module_.Value().As<Napi::Object>();
+          Napi::Function emit = handle.Get("emit").As<Napi::Function>();
+          emit.Call(handle, {Napi::String::New(env_, "message"), msg});
+      })) {}
 
 NodeLogObserver::~NodeLogObserver() {
     queue->stop();
 }
 
-bool NodeLogObserver::onRecord(mbgl::EventSeverity severity, mbgl::Event event, int64_t code, const std::string &text) {
+bool NodeLogObserver::onRecord(mbgl::EventSeverity severity, mbgl::Event event, int64_t code, const std::string& text) {
     queue->send({severity, event, code, text});
     return true;
 }

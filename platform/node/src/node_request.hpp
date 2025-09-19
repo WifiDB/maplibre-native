@@ -1,10 +1,6 @@
 #pragma once
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#pragma GCC diagnostic ignored "-Wshadow"
-#include <nan.h>
-#pragma GCC diagnostic pop
+#include <napi.h>
 
 #include <mbgl/storage/file_source.hpp>
 #include <mbgl/storage/resource.hpp>
@@ -20,23 +16,21 @@ struct NodeAsyncRequest : public mbgl::AsyncRequest {
     NodeRequest* request = nullptr;
 };
 
-class NodeRequest : public Nan::ObjectWrap {
+class NodeRequest : public Napi::ObjectWrap<NodeRequest> {
 public:
     NodeRequest(mbgl::FileSource::Callback, NodeAsyncRequest*);
     ~NodeRequest() override;
 
-    static Nan::Persistent<v8::Function> constructor;
+    static Napi::FunctionReference constructor;
+    static void Init(Napi::Env, Napi::Object);
 
-    static void Init(v8::Local<v8::Object>);
-
-    static void New(const Nan::FunctionCallbackInfo<v8::Value>&);
-    static void HandleCallback(const Nan::FunctionCallbackInfo<v8::Value>&);
+    static void New(const Napi::CallbackInfo&);
+    static Napi::Value HandleCallback(const Napi::CallbackInfo&);
 
     void unrefRequest();
 
     mbgl::FileSource::Callback callback;
     NodeAsyncRequest* asyncRequest;
-    Nan::AsyncResource* asyncResource = new Nan::AsyncResource("mbgl:execute");
 };
 
 } // namespace node_mbgl

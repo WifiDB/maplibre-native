@@ -7,39 +7,40 @@
 #include <mbgl/style/conversion/function.hpp>
 #include <mbgl/style/conversion/geojson.hpp>
 #include <mbgl/util/geojson.hpp>
-#include <nan.h>
 
 using namespace mbgl::style;
 using namespace mbgl::style::expression;
 
 namespace node_mbgl {
 
-Nan::Persistent<v8::Function> NodeExpression::constructor;
+Napi::FunctionReference NodeExpression::constructor;
 
-void NodeExpression::Init(v8::Local<v8::Object> target) {
-#if defined NODE_MODULE_VERSION && NODE_MODULE_VERSION < 93
-    v8::Local<v8::Context> context = target->CreationContext();
-#else
-    v8::Local<v8::Context> context = target->GetCreationContext().ToLocalChecked();
-#endif
-    v8::Local<v8::FunctionTemplate> tpl = Nan::New<v8::FunctionTemplate>(New);
-    tpl->SetClassName(Nan::New("Expression").ToLocalChecked());
-    tpl->InstanceTemplate()->SetInternalFieldCount(1); // what is this doing?
+void NodeExpression::Init(Napi::Env env, Napi::Object exports) {
+    Napi::HandleScope scope(env);
 
-    Nan::SetPrototypeMethod(tpl, "evaluate", Evaluate);
-    Nan::SetPrototypeMethod(tpl, "getType", GetType);
-    Nan::SetPrototypeMethod(tpl, "isFeatureConstant", IsFeatureConstant);
-    Nan::SetPrototypeMethod(tpl, "isZoomConstant", IsZoomConstant);
+    Napi::Function func = DefineClass(env, "Expression", {
+        InstanceMethod("evaluate", &NodeExpression::Evaluate),
+        InstanceMethod("getType", &NodeExpression::GetType),
+        InstanceMethod("isFeatureConstant", &NodeExpression::IsFeatureConstant),
+        InstanceMethod("isZoomConstant", &NodeExpression::IsZoomConstant),
+        InstanceMethod("serialize", &NodeExpression::Serialize),
+        StaticMethod("parse", &NodeExpression::Parse)
+    });
 
-    Nan::SetPrototypeMethod(tpl, "serialize", Serialize);
+    constructor = Napi::Persistent(func);
+    constructor.SuppressDestruct();
 
-    Nan::SetMethod(tpl, "parse", Parse);
-
-    constructor.Reset(tpl->GetFunction(context).ToLocalChecked()); // what is this doing?
-    Nan::Set(target, Nan::New("Expression").ToLocalChecked(), tpl->GetFunction(context).ToLocalChecked());
+    exports.Set("Expression", func);
 }
 
-type::Type parseType(v8::Local<v8::Object> type) {
+NodeExpression::NodeExpression(const Napi::CallbackInfo& info)
+    : Napi::ObjectWrap<NodeExpression>(info) {}
+
+NodeExpression::NodeExpression(Napi::Env env, std::unique_ptr<Expression> expr)
+    : Napi::ObjectWrap<NodeExpression>(env, constructor.New({})),
+      expression(std::move(expr)) {}
+
+static type::Type parseType(const Napi::Object& type) {
     static std::unordered_map<std::string, type::Type> types = {
         {"string", type::String},
         {"number", type::Number},
@@ -53,233 +54,113 @@ type::Type parseType(v8::Local<v8::Object> type) {
         {"resolvedImage", type::Image},
         {"variableAnchorOffsetCollection", type::VariableAnchorOffsetCollection}};
 
-    v8::Local<v8::Value> v8kind = Nan::Get(type, Nan::New("kind").ToLocalChecked()).ToLocalChecked();
-    std::string kind(*v8::String::Utf8Value(v8::Isolate::GetCurrent(), v8kind));
+    Napi::String kindStr = type.Get("kind").As<Napi::String>();
+    std::string kind = kindStr.Utf8Value();
 
     if (kind == "array") {
-#if defined NODE_MODULE_VERSION && NODE_MODULE_VERSION < 93
-        v8::Local<v8::Context> context = type->CreationContext();
-#else
-        v8::Local<v8::Context> context = type->GetCreationContext().ToLocalChecked();
-#endif
-        type::Type itemType = parseType(
-            Nan::Get(type, Nan::New("itemType").ToLocalChecked()).ToLocalChecked()->ToObject(context).ToLocalChecked());
+        type::Type itemType = parseType(type.Get("itemType").As<Napi::Object>());
         std::optional<std::size_t> N;
 
-        v8::Local<v8::String> Nkey = Nan::New("N").ToLocalChecked();
-        if (Nan::Has(type, Nkey).FromMaybe(false)) {
-            N = Nan::To<v8::Int32>(Nan::Get(type, Nkey).ToLocalChecked()).ToLocalChecked()->Value();
+        if (type.Has("N")) {
+            N = static_cast<std::size_t>(type.Get("N").As<Napi::Number>().Int64Value());
         }
         return type::Array(itemType, N);
     }
-
-    return types[kind];
+    
+    auto it = types.find(kind);
+    if (it != types.end()) {
+        return it->second;
+    }
+    
+    // Default or unknown type
+    return type::Value;
 }
 
-void NodeExpression::Parse(const Nan::FunctionCallbackInfo<v8::Value>& info) {
-    v8::Local<v8::Function> cons = Nan::New(constructor);
-    v8::Local<v8::Context> context = info.GetIsolate()->GetCurrentContext();
-
-    if (info.Length() < 1 || info[0]->IsUndefined()) {
-        return Nan::ThrowTypeError("Requires a JSON style expression argument.");
+void NodeExpression::Parse(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    Napi::HandleScope scope(env);
+    
+    if (info.Length() < 1 || info[0].IsUndefined()) {
+        Napi::TypeError::New(env, "Requires a JSON style expression argument.").ThrowAsJavaScriptException();
+        return;
     }
 
     std::optional<type::Type> expected;
-    if (info.Length() > 1 && info[1]->IsObject()) {
-        expected = parseType(info[1]->ToObject(context).ToLocalChecked());
+    if (info.Length() > 1 && info[1].IsObject()) {
+        expected = parseType(info[1].As<Napi::Object>());
     }
 
-    auto success = [&cons, &info](std::unique_ptr<Expression> result) {
-        auto nodeExpr = new NodeExpression(std::move(result));
-        auto wrapped = Nan::NewInstance(cons).ToLocalChecked();
-        nodeExpr->Wrap(wrapped);
-        info.GetReturnValue().Set(wrapped);
-    };
-
-    auto fail = [&info](const std::vector<ParsingError>& errors) {
-        v8::Local<v8::Array> result = Nan::New<v8::Array>();
-        for (std::size_t i = 0; i < errors.size(); ++i) {
-            const auto& error = errors[i];
-            v8::Local<v8::Object> err = Nan::New<v8::Object>();
-            Nan::Set(err, Nan::New("key").ToLocalChecked(), Nan::New(error.key.c_str()).ToLocalChecked());
-            Nan::Set(err, Nan::New("error").ToLocalChecked(), Nan::New(error.message.c_str()).ToLocalChecked());
-            Nan::Set(result, Nan::New(static_cast<uint32_t>(i)), err);
-        }
-        info.GetReturnValue().Set(result);
-    };
-
-    auto expr = info[0];
+    Napi::Value expr = info[0];
 
     try {
         mbgl::style::conversion::Convertible convertible(expr);
 
-        if (expr->IsObject() && !expr->IsArray() && expected) {
+        if (expr.IsObject() && !expr.IsArray() && expected) {
             mbgl::style::conversion::Error error;
             auto func = convertFunctionToExpression(*expected, convertible, error, false);
             if (func) {
-                return success(std::move(*func));
+                Napi::Object obj = constructor.New({});
+                (new NodeExpression(env, std::move(*func)))->Wrap(obj);
+                info.GetReturnValue().Set(obj);
+                return;
             }
-            return fail({{error.message, ""}});
+            Napi::Array errorsArray = Napi::Array::New(env, 1);
+            Napi::Object errObj = Napi::Object::New(env);
+            errObj.Set("key", Napi::String::New(env, ""));
+            errObj.Set("error", Napi::String::New(env, error.message));
+            errorsArray.Set(0U, errObj);
+            info.GetReturnValue().Set(errorsArray);
+            return;
         }
 
         ParsingContext ctx = expected ? ParsingContext(*expected) : ParsingContext();
         ParseResult parsed = ctx.parseLayerPropertyExpression(mbgl::style::conversion::Convertible(expr));
         if (parsed) {
             assert(ctx.getErrors().empty());
-            return success(std::move(*parsed));
+            Napi::Object obj = constructor.New({});
+            (new NodeExpression(env, std::move(*parsed)))->Wrap(obj);
+            info.GetReturnValue().Set(obj);
+            return;
         }
-        return fail(ctx.getErrors());
+
+        Napi::Array errorsArray = Napi::Array::New(env, ctx.getErrors().size());
+        for (std::size_t i = 0; i < ctx.getErrors().size(); ++i) {
+            const auto& error = ctx.getErrors()[i];
+            Napi::Object errObj = Napi::Object::New(env);
+            errObj.Set("key", Napi::String::New(env, error.key));
+            errObj.Set("error", Napi::String::New(env, error.message));
+            errorsArray.Set(static_cast<uint32_t>(i), errObj);
+        }
+        info.GetReturnValue().Set(errorsArray);
     } catch (std::exception& ex) {
-        return Nan::ThrowError(ex.what());
+        Napi::TypeError::New(env, ex.what()).ThrowAsJavaScriptException();
     }
 }
 
-void NodeExpression::New(const Nan::FunctionCallbackInfo<v8::Value>& info) {
-    if (!info.IsConstructCall()) {
-        return Nan::ThrowTypeError("Use the new operator to create new Expression objects");
-    }
-
-    info.GetReturnValue().Set(info.This());
-}
-
-struct ToValue {
-    v8::Local<v8::Value> operator()(mbgl::NullValue) {
-        Nan::EscapableHandleScope scope;
-        return scope.Escape(Nan::Null());
-    }
-
-    v8::Local<v8::Value> operator()(bool t) {
-        Nan::EscapableHandleScope scope;
-        return scope.Escape(Nan::New(t));
-    }
-
-    v8::Local<v8::Value> operator()(double t) {
-        Nan::EscapableHandleScope scope;
-        return scope.Escape(Nan::New(t));
-    }
-
-    v8::Local<v8::Value> operator()(const std::string& t) {
-        Nan::EscapableHandleScope scope;
-        return scope.Escape(Nan::New(t).ToLocalChecked());
-    }
-
-    v8::Local<v8::Value> operator()(const std::vector<Value>& array) {
-        Nan::EscapableHandleScope scope;
-        v8::Local<v8::Array> result = Nan::New<v8::Array>();
-        for (std::uint32_t i = 0; i < array.size(); i++) {
-            Nan::Set(result, i, toJS(array[i]));
-        }
-        return scope.Escape(result);
-    }
-
-    v8::Local<v8::Value> operator()(const Collator&) {
-        // Collators are excluded from constant folding and there's no Literal parser
-        // for them so there shouldn't be any way to serialize this value.
-        assert(false);
-        Nan::EscapableHandleScope scope;
-        return scope.Escape(Nan::Null());
-    }
-
-    v8::Local<v8::Value> operator()(const Formatted& formatted) {
-        // This mimics the internal structure of the Formatted class in formatted.js
-        // A better approach might be to use the explicit serialized form
-        // both here and on the JS side? e.g. toJS(fromExpressionValue<mbgl::Value>(formatted))
-        std::unordered_map<std::string, mbgl::Value> serialized;
-        std::vector<mbgl::Value> sections;
-        for (const auto& section : formatted.sections) {
-            std::unordered_map<std::string, mbgl::Value> serializedSection;
-            serializedSection.emplace("text", section.text);
-            if (section.fontScale) {
-                serializedSection.emplace("scale", *section.fontScale);
-            } else {
-                serializedSection.emplace("scale", mbgl::NullValue());
-            }
-            if (section.fontStack) {
-                std::string fontStackString;
-                serializedSection.emplace("fontStack", mbgl::fontStackToString(*section.fontStack));
-            } else {
-                serializedSection.emplace("fontStack", mbgl::NullValue());
-            }
-            if (section.textColor) {
-                serializedSection.emplace("textColor", section.textColor->toObject());
-            } else {
-                serializedSection.emplace("textColor", mbgl::NullValue());
-            }
-            sections.emplace_back(serializedSection);
-        }
-        serialized.emplace("sections", sections);
-
-        return toJS(serialized);
-    }
-
-    v8::Local<v8::Value> operator()(const mbgl::Color& color) {
-        return operator()(std::vector<Value>{static_cast<double>(color.r),
-                                             static_cast<double>(color.g),
-                                             static_cast<double>(color.b),
-                                             static_cast<double>(color.a)});
-    }
-
-    v8::Local<v8::Value> operator()(const mbgl::Padding& padding) {
-        return operator()(std::vector<Value>{static_cast<double>(padding.top),
-                                             static_cast<double>(padding.right),
-                                             static_cast<double>(padding.bottom),
-                                             static_cast<double>(padding.left)});
-    }
-
-    v8::Local<v8::Value> operator()(const std::unordered_map<std::string, Value>& map) {
-        Nan::EscapableHandleScope scope;
-        v8::Local<v8::Object> result = Nan::New<v8::Object>();
-        for (const auto& entry : map) {
-            Nan::Set(result, Nan::New(entry.first).ToLocalChecked(), toJS(entry.second));
-        }
-
-        return scope.Escape(result);
-    }
-
-    v8::Local<v8::Value> operator()(const Image& image) { return toJS(image.toValue()); }
-
-    v8::Local<v8::Value> operator()(const mbgl::VariableAnchorOffsetCollection& variableAnchorOffsets) {
-        std::vector<Value> components;
-        components.reserve(variableAnchorOffsets.size() * 2);
-        for (const auto& variableAnchorOffset : variableAnchorOffsets) {
-            components.emplace_back(
-                std::string(mbgl::Enum<mbgl::style::SymbolAnchorType>::toString(variableAnchorOffset.anchorType)));
-            components.emplace_back(std::vector<Value>{static_cast<double>(variableAnchorOffset.offset[0]),
-                                                       static_cast<double>(variableAnchorOffset.offset[1])});
-        }
-        return operator()(components);
-    }
-};
-
-v8::Local<v8::Value> toJS(const Value& value) {
-    return Value::visit(value, ToValue());
-}
-
-void NodeExpression::Evaluate(const Nan::FunctionCallbackInfo<v8::Value>& info) {
-    v8::Local<v8::Context> context = info.GetIsolate()->GetCurrentContext();
-    auto* nodeExpr = ObjectWrap::Unwrap<NodeExpression>(info.Holder());
-    const std::unique_ptr<Expression>& expression = nodeExpr->expression;
-
-    if (info.Length() < 2 || !info[0]->IsObject()) {
-        return Nan::ThrowTypeError("Requires globals and feature arguments.");
+void NodeExpression::Evaluate(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    Napi::HandleScope scope(env);
+    
+    if (info.Length() < 2 || !info[0].IsObject()) {
+        Napi::TypeError::New(env, "Requires globals and feature arguments.").ThrowAsJavaScriptException();
+        return;
     }
 
     std::optional<float> zoom;
-    v8::Local<v8::Value> v8zoom =
-        Nan::Get(info[0]->ToObject(context).ToLocalChecked(), Nan::New("zoom").ToLocalChecked()).ToLocalChecked();
-    if (v8zoom->IsNumber()) zoom = static_cast<float>(Nan::To<double>(v8zoom).FromJust());
+    Napi::Object globals = info[0].As<Napi::Object>();
+    if (globals.Has("zoom") && globals.Get("zoom").IsNumber()) {
+        zoom = static_cast<float>(globals.Get("zoom").As<Napi::Number>().DoubleValue());
+    }
 
     std::optional<double> heatmapDensity;
-    v8::Local<v8::Value> v8heatmapDensity = Nan::Get(info[0]->ToObject(context).ToLocalChecked(),
-                                                     Nan::New("heatmapDensity").ToLocalChecked())
-                                                .ToLocalChecked();
-    if (v8heatmapDensity->IsNumber()) heatmapDensity = Nan::To<double>(v8heatmapDensity).FromJust();
-
-    Nan::JSON NanJSON;
+    if (globals.Has("heatmapDensity") && globals.Get("heatmapDensity").IsNumber()) {
+        heatmapDensity = globals.Get("heatmapDensity").As<Napi::Number>().DoubleValue();
+    }
+    
     conversion::Error conversionError;
     std::optional<mbgl::GeoJSON> geoJSON = conversion::convert<mbgl::GeoJSON>(info[1], conversionError);
     if (!geoJSON) {
-        Nan::ThrowTypeError(conversionError.message.c_str());
+        Napi::TypeError::New(env, conversionError.message.c_str()).ThrowAsJavaScriptException();
         return;
     }
 
@@ -287,45 +168,138 @@ void NodeExpression::Evaluate(const Nan::FunctionCallbackInfo<v8::Value>& info) 
         mapbox::geojson::feature feature = geoJSON->get<mapbox::geojson::feature>();
         auto result = expression->evaluate(zoom, feature, heatmapDensity);
         if (result) {
-            info.GetReturnValue().Set(toJS(*result));
+            info.GetReturnValue().Set(toJS(env, *result));
         } else {
-            v8::Local<v8::Object> res = Nan::New<v8::Object>();
-            Nan::Set(
-                res, Nan::New("error").ToLocalChecked(), Nan::New(result.error().message.c_str()).ToLocalChecked());
+            Napi::Object res = Napi::Object::New(env);
+            res.Set("error", Napi::String::New(env, result.error().message));
             info.GetReturnValue().Set(res);
         }
     } catch (std::exception& ex) {
-        return Nan::ThrowTypeError(ex.what());
+        Napi::TypeError::New(env, ex.what()).ThrowAsJavaScriptException();
     }
 }
 
-void NodeExpression::GetType(const Nan::FunctionCallbackInfo<v8::Value>& info) {
-    auto* nodeExpr = ObjectWrap::Unwrap<NodeExpression>(info.Holder());
-    const std::unique_ptr<Expression>& expression = nodeExpr->expression;
-
-    const type::Type type = expression->getType();
+void NodeExpression::GetType(const Napi::CallbackInfo& info) {
+    const type::Type type = this->expression->getType();
     const std::string name = type.match([&](const auto& t) { return t.getName(); });
-    info.GetReturnValue().Set(Nan::New(name.c_str()).ToLocalChecked());
+    info.GetReturnValue().Set(Napi::String::New(info.Env(), name));
 }
 
-void NodeExpression::IsFeatureConstant(const Nan::FunctionCallbackInfo<v8::Value>& info) {
-    auto* nodeExpr = ObjectWrap::Unwrap<NodeExpression>(info.Holder());
-    const std::unique_ptr<Expression>& expression = nodeExpr->expression;
-    info.GetReturnValue().Set(Nan::New(isFeatureConstant(*expression)));
+void NodeExpression::IsFeatureConstant(const Napi::CallbackInfo& info) {
+    info.GetReturnValue().Set(Napi::Boolean::New(info.Env(), isFeatureConstant(*this->expression)));
 }
 
-void NodeExpression::IsZoomConstant(const Nan::FunctionCallbackInfo<v8::Value>& info) {
-    auto* nodeExpr = ObjectWrap::Unwrap<NodeExpression>(info.Holder());
-    const std::unique_ptr<Expression>& expression = nodeExpr->expression;
-    info.GetReturnValue().Set(Nan::New(isZoomConstant(*expression)));
+void NodeExpression::IsZoomConstant(const Napi::CallbackInfo& info) {
+    info.GetReturnValue().Set(Napi::Boolean::New(info.Env(), isZoomConstant(*this->expression)));
 }
 
-void NodeExpression::Serialize(const Nan::FunctionCallbackInfo<v8::Value>& info) {
-    auto* nodeExpr = ObjectWrap::Unwrap<NodeExpression>(info.Holder());
-    const std::unique_ptr<Expression>& expression = nodeExpr->expression;
-
-    const mbgl::Value serialized = expression->serialize();
-    info.GetReturnValue().Set(toJS(serialized));
+void NodeExpression::Serialize(const Napi::CallbackInfo& info) {
+    const mbgl::Value serialized = this->expression->serialize();
+    info.GetReturnValue().Set(toJS(info.Env(), serialized));
 }
 
-} // namespace node_mbgl
+Napi::Value toJS(Napi::Env env, const Value& value) {
+    class ToValue : public mapbox::util::Value::ConstVisitor {
+    public:
+        ToValue(Napi::Env env_) : env(env_) {}
+
+        Napi::Value operator()(mbgl::NullValue) const {
+            return env.Null();
+        }
+
+        Napi::Value operator()(bool t) const {
+            return Napi::Boolean::New(env, t);
+        }
+
+        Napi::Value operator()(double t) const {
+            return Napi::Number::New(env, t);
+        }
+
+        Napi::Value operator()(const std::string& t) const {
+            return Napi::String::New(env, t);
+        }
+
+        Napi::Value operator()(const std::vector<Value>& array) const {
+            Napi::Array result = Napi::Array::New(env, array.size());
+            for (std::uint32_t i = 0; i < array.size(); i++) {
+                result.Set(i, toJS(env, array[i]));
+            }
+            return result;
+        }
+
+        Napi::Value operator()(const Collator&) const {
+            assert(false);
+            return env.Null();
+        }
+
+        Napi::Value operator()(const Formatted& formatted) const {
+            Napi::Object serialized = Napi::Object::New(env);
+            Napi::Array sections = Napi::Array::New(env, formatted.sections.size());
+            for (std::uint32_t i = 0; i < formatted.sections.size(); ++i) {
+                const auto& section = formatted.sections[i];
+                Napi::Object serializedSection = Napi::Object::New(env);
+                serializedSection.Set("text", Napi::String::New(env, section.text));
+                if (section.fontScale) {
+                    serializedSection.Set("scale", Napi::Number::New(env, *section.fontScale));
+                } else {
+                    serializedSection.Set("scale", env.Null());
+                }
+                if (section.fontStack) {
+                    serializedSection.Set("fontStack", Napi::String::New(env, mbgl::fontStackToString(*section.fontStack)));
+                } else {
+                    serializedSection.Set("fontStack", env.Null());
+                }
+                if (section.textColor) {
+                    serializedSection.Set("textColor", toJS(env, section.textColor->toObject()));
+                } else {
+                    serializedSection.Set("textColor", env.Null());
+                }
+                sections.Set(i, serializedSection);
+            }
+            serialized.Set("sections", sections);
+            return serialized;
+        }
+
+        Napi::Value operator()(const mbgl::Color& color) const {
+            return operator()(std::vector<Value>{static_cast<double>(color.r),
+                                                  static_cast<double>(color.g),
+                                                  static_cast<double>(color.b),
+                                                  static_cast<double>(color.a)});
+        }
+        
+        Napi::Value operator()(const mbgl::Padding& padding) const {
+            return operator()(std::vector<Value>{static_cast<double>(padding.top),
+                                                  static_cast<double>(padding.right),
+                                                  static_cast<double>(padding.bottom),
+                                                  static_cast<double>(padding.left)});
+        }
+
+        Napi::Value operator()(const std::unordered_map<std::string, Value>& map) const {
+            Napi::Object result = Napi::Object::New(env);
+            for (const auto& entry : map) {
+                result.Set(Napi::String::New(env, entry.first), toJS(env, entry.second));
+            }
+            return result;
+        }
+        
+        Napi::Value operator()(const Image& image) const {
+            return toJS(env, image.toValue());
+        }
+        
+        Napi::Value operator()(const mbgl::VariableAnchorOffsetCollection& variableAnchorOffsets) const {
+            std::vector<Value> components;
+            components.reserve(variableAnchorOffsets.size() * 2);
+            for (const auto& variableAnchorOffset : variableAnchorOffsets) {
+                components.emplace_back(std::string(mbgl::Enum<mbgl::style::SymbolAnchorType>::toString(variableAnchorOffset.anchorType)));
+                components.emplace_back(std::vector<Value>{static_cast<double>(variableAnchorOffset.offset[0]),
+                                                          static_cast<double>(variableAnchorOffset.offset[1])});
+            }
+            return operator()(components);
+        }
+
+    private:
+        Napi::Env env;
+    };
+
+    return Value::visit(value, ToValue(env));
+}
