@@ -516,6 +516,7 @@ list(APPEND SRC_FILES
     ${PROJECT_SOURCE_DIR}/src/mbgl/layout/circle_layout.hpp
     ${PROJECT_SOURCE_DIR}/src/mbgl/layout/clip_lines.cpp
     ${PROJECT_SOURCE_DIR}/src/mbgl/layout/clip_lines.hpp
+    ${PROJECT_SOURCE_DIR}/src/mbgl/layout/line_dash_util.hpp
     ${PROJECT_SOURCE_DIR}/src/mbgl/layout/layout.hpp
     ${PROJECT_SOURCE_DIR}/src/mbgl/layout/merge_lines.cpp
     ${PROJECT_SOURCE_DIR}/src/mbgl/layout/merge_lines.hpp

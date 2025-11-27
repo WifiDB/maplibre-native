@@ -22,6 +22,11 @@
 #include <mbgl/util/stopwatch.hpp>
 #include <mbgl/util/thread_pool.hpp>
 
+// ADDED: Includes for data-driven dasharray support
+#include <mbgl/geometry/line_atlas.hpp>
+#include <mbgl/layout/line_dash_util.hpp>
+#include <mbgl/style/layers/line_layer_properties.hpp>
+
 #include <unordered_set>
 #include <utility>
 
@@ -39,6 +44,7 @@ GeometryTileWorker::GeometryTileWorker(ActorRef<GeometryTileWorker> self_,
                                        const float pixelRatio_,
                                        const bool showCollisionBoxes_,
                                        gfx::DynamicTextureAtlasPtr dynamicTextureAtlas_,
+                                       std::shared_ptr<LineAtlas> lineAtlas_,  // ADDED
                                        std::shared_ptr<FontFaces> fontFaces_)
     : self(std::move(self_)),
       parent(std::move(parent_)),
@@ -50,6 +56,7 @@ GeometryTileWorker::GeometryTileWorker(ActorRef<GeometryTileWorker> self_,
       pixelRatio(pixelRatio_),
       showCollisionBoxes(showCollisionBoxes_),
       dynamicTextureAtlas(dynamicTextureAtlas_),
+      lineAtlas(std::move(lineAtlas_)),  // ADDED
       fontFaces(fontFaces_) {}
 
 GeometryTileWorker::~GeometryTileWorker() {
@@ -210,19 +217,18 @@ void GeometryTileWorker::setShowCollisionBoxes(bool showCollisionBoxes_, uint64_
 
         switch (state) {
             case Idle:
-                if (!hasPendingParseResult()) {
-                    // Trigger parse if nothing is in flight, otherwise symbol
-                    // layout will automatically pick up the change
-                    parse();
-                    coalesce();
-                }
+                parse();
+                coalesce();
                 break;
 
             case Coalescing:
-                state = NeedsSymbolLayout;
+                state = NeedsParse;
                 break;
 
             case NeedsSymbolLayout:
+                state = NeedsParse;
+                break;
+
             case NeedsParse:
                 break;
         }
@@ -231,34 +237,73 @@ void GeometryTileWorker::setShowCollisionBoxes(bool showCollisionBoxes_, uint64_
     }
 }
 
-void GeometryTileWorker::symbolDependenciesChanged() {
+void GeometryTileWorker::onGlyphsAvailable(GlyphMap glyphs, HBShapeResults requests) {
     MLN_TRACE_FUNC();
 
-    try {
-        switch (state) {
-            case Idle:
-                if (!layouts.empty()) {
-                    // Layouts are created only by parsing and the parse result can only be
-                    // cleared by performLayout, which also clears the layouts.
-                    assert(hasPendingParseResult());
-                    finalizeLayout();
-                    coalesce();
-                }
-                break;
+    for (auto& pair : glyphs) {
+        const auto& fontStack = pair.first;
+        const auto& glyphRange = pair.second;
 
-            case Coalescing:
-                if (!layouts.empty()) {
-                    state = NeedsSymbolLayout;
-                }
-                break;
-
-            case NeedsSymbolLayout:
-            case NeedsParse:
-                break;
+        auto it = glyphMap.find(fontStack);
+        if (it == glyphMap.end()) {
+            glyphMap.emplace(fontStack, std::move(glyphRange));
+        } else {
+            for (auto& glyph : glyphRange) {
+                it->second.emplace(glyph.first, std::move(glyph.second));
+            }
         }
-    } catch (...) {
-        parent.invoke(&GeometryTile::onError, std::current_exception(), correlationID);
+
+        pendingGlyphDependencies.glyphs.erase(fontStack);
     }
+
+    for (auto& pair : requests) {
+        const auto& fontStack = pair.first;
+        const auto& shapingRequests = pair.second;
+
+        for (auto& shapingPair : shapingRequests) {
+            const auto& type = shapingPair.first;
+            const auto& shapeRequests = shapingPair.second;
+            auto it = pendingGlyphDependencies.shapes[fontStack][type].begin();
+            while (it != pendingGlyphDependencies.shapes[fontStack][type].end()) {
+                if (shapeRequests.count(*it)) {
+                    it = pendingGlyphDependencies.shapes[fontStack][type].erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+    }
+
+    symbolDependenciesChanged();
+}
+
+void GeometryTileWorker::onImagesAvailable(ImageMap newIconMap,
+                                           ImageMap newPatternMap,
+                                           ImageVersionMap versionMap_,
+                                           uint64_t imageCorrelationID_) {
+    MLN_TRACE_FUNC();
+
+    if (imageCorrelationID_ != imageCorrelationID) {
+        return; // Ignore outdated image response.
+    }
+
+    for (auto& newIcon : newIconMap) {
+        iconMap.emplace(newIcon.first, std::move(newIcon.second));
+        pendingImageDependencies.erase(newIcon.first);
+    }
+
+    for (auto& newPattern : newPatternMap) {
+        patternMap.emplace(newPattern.first, std::move(newPattern.second));
+        pendingImageDependencies.erase(newPattern.first);
+    }
+
+    versionMap = std::move(versionMap_);
+    symbolDependenciesChanged();
+}
+
+void GeometryTileWorker::coalesce() {
+    state = Coalescing;
+    self.invoke(&GeometryTileWorker::coalesced);
 }
 
 void GeometryTileWorker::coalesced() {
@@ -280,11 +325,15 @@ void GeometryTileWorker::coalesced() {
                 break;
 
             case NeedsSymbolLayout:
-                // We may have entered NeedsSymbolLayout while coalescing
-                // after a performLayout. In that case, we need to
-                // start over with parsing in order to do another layout.
-                hasPendingParseResult() ? finalizeLayout() : parse();
-                coalesce();
+                // We don't abort symbol layout for new data, but we do require that parsing has not yet
+                // begun for the new parse. If it has, we're behind and we need to abort the layout, and
+                // start parsing again.
+                if (hasPendingParseResult()) {
+                    finalizeLayout();
+                } else {
+                    parse();
+                    coalesce();
+                }
                 break;
         }
     } catch (...) {
@@ -292,98 +341,40 @@ void GeometryTileWorker::coalesced() {
     }
 }
 
-void GeometryTileWorker::coalesce() {
+void GeometryTileWorker::symbolDependenciesChanged() {
     MLN_TRACE_FUNC();
 
-    state = Coalescing;
+    if (!hasPendingDependencies()) {
+        state = NeedsSymbolLayout;
+    }
+
     self.invoke(&GeometryTileWorker::coalesced);
-}
-
-void GeometryTileWorker::onGlyphsAvailable(GlyphMap newGlyphMap, HBShapeResults results) {
-    MLN_TRACE_FUNC();
-
-    for (auto& newFontGlyphs : newGlyphMap) {
-        FontStackHash fontStack = newFontGlyphs.first;
-        Glyphs& newGlyphs = newFontGlyphs.second;
-
-        Glyphs& glyphs = glyphMap[fontStack];
-        for (auto& pendingGlyphDependency : pendingGlyphDependencies.glyphs) {
-            // Linear lookup here to handle reverse of FontStackHash -> FontStack,
-            // since dependencies need the full font stack name to make a request
-            // There should not be many fontstacks to look through
-            if (FontStackHasher()(pendingGlyphDependency.first) == fontStack) {
-                GlyphIDs& pendingGlyphIDs = pendingGlyphDependency.second;
-                for (auto& newGlyph : newGlyphs) {
-                    const GlyphID& glyphID = newGlyph.first;
-                    std::optional<Immutable<Glyph>>& glyph = newGlyph.second;
-
-                    if (pendingGlyphIDs.erase(glyphID)) {
-                        if (!(glyphID.complex.code == 0 && glyphID.complex.type != GlyphIDType::FontPBF)) {
-                            glyphs.emplace(glyphID, std::move(glyph));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (!results.empty()) {
-        pendingGlyphDependencies.shapes.clear();
-
-        for (auto& newFontGlyphs : newGlyphMap) {
-            FontStackHash fontStack = newFontGlyphs.first;
-            Glyphs& newGlyphs = newFontGlyphs.second;
-
-            Glyphs& glyphs = glyphMap[fontStack];
-            for (auto& newGlyph : newGlyphs) {
-                const GlyphID& glyphID = newGlyph.first;
-                std::optional<Immutable<Glyph>>& glyph = newGlyph.second;
-
-                if (!(glyphID.complex.code == 0 && glyphID.complex.type != GlyphIDType::FontPBF))
-                    glyphs.emplace(glyphID, std::move(glyph));
-            }
-        }
-
-        for (auto& layout : layouts) {
-            if (layout && layout->needFinalizeSymbols()) {
-                layout->finalizeSymbols(results);
-            }
-        }
-    }
-
-    symbolDependenciesChanged();
-}
-
-void GeometryTileWorker::onImagesAvailable(ImageMap newIconMap,
-                                           ImageMap newPatternMap,
-                                           ImageVersionMap newVersionMap,
-                                           uint64_t imageCorrelationID_) {
-    MLN_TRACE_FUNC();
-
-    if (imageCorrelationID != imageCorrelationID_) {
-        return; // Ignore outdated image request replies.
-    }
-    iconMap = std::move(newIconMap);
-    patternMap = std::move(newPatternMap);
-    versionMap = std::move(newVersionMap);
-    pendingImageDependencies.clear();
-    symbolDependenciesChanged();
 }
 
 void GeometryTileWorker::requestNewGlyphs(const GlyphDependencies& glyphDependencies) {
     MLN_TRACE_FUNC();
 
-    for (auto& fontDependencies : glyphDependencies.glyphs) {
-        auto fontGlyphs = glyphMap.find(FontStackHasher()(fontDependencies.first));
-        for (auto glyphID : fontDependencies.second) {
-            if (fontGlyphs == glyphMap.end() || fontGlyphs->second.find(glyphID) == fontGlyphs->second.end()) {
-                pendingGlyphDependencies.glyphs[fontDependencies.first].insert(glyphID);
+    for (auto& glyphDependency : glyphDependencies.glyphs) {
+        const auto& fontStack = glyphDependency.first;
+        const auto& glyphRange = glyphDependency.second;
+
+        auto it = glyphMap.find(fontStack);
+        if (it == glyphMap.end() || it->second.empty()) {
+            pendingGlyphDependencies.glyphs[fontStack].insert(glyphRange.begin(), glyphRange.end());
+        } else {
+            for (auto& glyph : glyphRange) {
+                if (it->second.find(glyph) == it->second.end()) {
+                    pendingGlyphDependencies.glyphs[fontStack].insert(glyph);
+                }
             }
         }
     }
-    for (auto& fontDependencies : glyphDependencies.shapes) {
-        auto& fontStack = fontDependencies.first;
-        for (const auto& typeDependencies : fontDependencies.second) {
+
+    for (auto& shapeDependency : glyphDependencies.shapes) {
+        const auto& fontStack = shapeDependency.first;
+        const auto& types = shapeDependency.second;
+
+        for (auto& typeDependencies : types) {
             auto& type = typeDependencies.first;
             auto& strs = typeDependencies.second;
             for (auto& str : strs) {
@@ -493,7 +484,74 @@ void GeometryTileWorker::parse() {
                     continue;
 
                 const GeometryCollection& geometries = feature->getGeometries();
-                bucket->addFeature(*feature, geometries, {}, PatternLayerMap(), i, id.canonical);
+                
+                // ADDED: Build pattern dependencies for data-driven properties (including dasharrays)
+                PatternLayerMap patternDependencies;
+                DashPositions dashPositions;
+                
+                // Check if any layer in the group has data-driven dasharray
+                bool hasDataDrivenDasharray = false;
+                for (const auto& layerProps : group) {
+                    if (layerProps->baseImpl->getTypeInfo() == LineLayer::Impl::staticTypeInfo()) {
+                        const auto& lineProps = static_cast<const LineLayerProperties&>(*layerProps);
+                        const auto& dasharrayProp = lineProps.evaluated.get<LineDasharray>();
+                        if (!dasharrayProp.isConstant()) {
+                            hasDataDrivenDasharray = true;
+                            break;
+                        }
+                    }
+                }
+
+                // Evaluate dasharray expressions if needed and LineAtlas is available
+                if (hasDataDrivenDasharray && lineAtlas) {
+                    const float zoom = static_cast<float>(id.overscaledZ);
+                    
+                    for (const auto& layerProps : group) {
+                        // Only process line layers
+                        if (layerProps->baseImpl->getTypeInfo() != LineLayer::Impl::staticTypeInfo()) {
+                            continue;
+                        }
+                        
+                        const auto& lineProps = static_cast<const LineLayerProperties&>(*layerProps);
+                        const auto& dasharrayProp = lineProps.evaluated.get<LineDasharray>();
+                        
+                        // Skip constant dasharrays (handled by tweaker uniforms)
+                        if (dasharrayProp.isConstant()) {
+                            continue;
+                        }
+                        
+                        // Get line-cap to determine pattern cap
+                        const auto lineCap = lineProps.evaluated.get<LineCap>();
+                        const LinePatternCap cap = (lineCap == LineCapType::Round) 
+                            ? LinePatternCap::Round 
+                            : LinePatternCap::Square;
+                        
+                        // Evaluate dasharray at three zoom levels for smooth interpolation
+                        auto minDash = dasharrayProp.evaluate(*feature, zoom - 1.0f, id.canonical, {});
+                        auto midDash = dasharrayProp.evaluate(*feature, zoom, id.canonical, {});
+                        auto maxDash = dasharrayProp.evaluate(*feature, zoom + 1.0f, id.canonical, {});
+                        
+                        // Format as keys for LineAtlas lookup
+                        std::string minKey = formatDashKey(minDash, cap);
+                        std::string midKey = formatDashKey(midDash, cap);
+                        std::string maxKey = formatDashKey(maxDash, cap);
+                        
+                        // Store in pattern dependencies map
+                        patternDependencies[layerProps->baseImpl->id] = PatternDependency{
+                            std::move(minKey),
+                            std::move(midKey),
+                            std::move(maxKey)
+                        };
+                    }
+                    
+                    // Build dash positions from pattern dependencies using LineAtlas
+                    if (!patternDependencies.empty()) {
+                        dashPositions = prepareDashPositions(patternDependencies, *lineAtlas);
+                    }
+                }
+
+                // Call addFeature with pattern dependencies and dash positions
+                bucket->addFeature(*feature, geometries, {}, patternDependencies, dashPositions, i, id.canonical);
                 featureIndex->insert(geometries, i, sourceLayerID, leaderImpl.id);
             }
 

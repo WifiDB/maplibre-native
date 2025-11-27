@@ -12,6 +12,10 @@
 
 namespace mbgl {
 
+// ADDED: Forward declaration for DashPositions
+class DashEntry;
+using DashPositions = mbgl::unordered_map<std::string, DashEntry>;
+
 class PatternDependency {
 public:
     std::string min;
@@ -181,7 +185,9 @@ public:
 
     bool hasDependencies() const override { return hasPattern; }
 
+    // MODIFIED: Added DashPositions parameter
     void createBucket(const ImagePositions& patternPositions,
+                      const DashPositions& dashPositions,
                       std::unique_ptr<FeatureIndex>& featureIndex,
                       mbgl::unordered_map<std::string, LayerRenderData>& renderData,
                       const bool /*firstLoad*/,
@@ -194,7 +200,8 @@ public:
             const PatternLayerMap& patterns = patternFeature.getPatterns();
             const GeometryCollection& geometries = feature->getGeometries();
 
-            bucket->addFeature(*feature, geometries, patternPositions, patterns, i, canonical);
+            // MODIFIED: Pass dashPositions to addFeature
+            bucket->addFeature(*feature, geometries, patternPositions, patterns, dashPositions, i, canonical);
             featureIndex->insert(geometries, i, sourceLayerID, bucketLeaderID);
         }
         if (bucket->hasData()) {
