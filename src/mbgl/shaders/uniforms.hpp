@@ -33,6 +33,8 @@ MBGL_DEFINE_UNIFORM_SCALAR(float, offset);
 MBGL_DEFINE_UNIFORM_SCALAR(float, weight);
 MBGL_DEFINE_UNIFORM_VECTOR(uint16_t, 4, pattern_from);
 MBGL_DEFINE_UNIFORM_VECTOR(uint16_t, 4, pattern_to);
+MBGL_DEFINE_UNIFORM_VECTOR(float, 4, dasharray_from);
+MBGL_DEFINE_UNIFORM_VECTOR(float, 4, dasharray_to);
 
 } // namespace uniforms
 } // namespace mbgl

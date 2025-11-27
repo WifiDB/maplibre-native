@@ -36,18 +36,18 @@ layout (std140) uniform LineSDFDrawableUBO {
     lowp float u_offset_t;
     lowp float u_width_t;
     lowp float u_floorwidth_t;
-    lowp float u_dasharray_from_t;  // ADD
-    lowp float u_dasharray_to_t;    // ADD
+    lowp float u_dasharray_from_t;
+    lowp float u_dasharray_to_t;
     lowp float drawable_pad1;
     lowp float drawable_pad2;
 };
 
 layout (std140) uniform LineSDFTilePropsUBO {
-    highp float u_tileratio;        // ADD
-    highp float u_crossfade_from;   // ADD
-    highp float u_crossfade_to;     // ADD
-    highp float u_lineatlas_width;  // ADD
-    highp float u_lineatlas_height; // ADD
+    highp float u_tileratio;
+    highp float u_crossfade_from;
+    highp float u_crossfade_to;
+    highp float u_lineatlas_width;
+    highp float u_lineatlas_height;
     highp float u_mix;
     highp float tileprops_pad1;
     highp float tileprops_pad2;
@@ -61,8 +61,8 @@ layout (std140) uniform LineEvaluatedPropsUBO {
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
-    highp vec4 u_dasharray_from;    // ADD
-    highp vec4 u_dasharray_to;      // ADD
+    highp vec4 u_dasharray_from;
+    highp vec4 u_dasharray_to;
     lowp float props_pad1;
 };
 
@@ -79,8 +79,8 @@ out float v_gamma_scale;
 #pragma mapbox: define lowp float offset
 #pragma mapbox: define mediump float width
 #pragma mapbox: define lowp float floorwidth
-#pragma mapbox: define mediump vec4 dasharray_from  // ADD
-#pragma mapbox: define mediump vec4 dasharray_to    // ADD
+#pragma mapbox: define mediump vec4 dasharray_from
+#pragma mapbox: define mediump vec4 dasharray_to
 
 void main() {
     #pragma mapbox: initialize highp vec4 color
@@ -90,8 +90,8 @@ void main() {
     #pragma mapbox: initialize lowp float offset
     #pragma mapbox: initialize mediump float width
     #pragma mapbox: initialize lowp float floorwidth
-    #pragma mapbox: initialize mediump vec4 dasharray_from  // ADD
-    #pragma mapbox: initialize mediump vec4 dasharray_to    // ADD
+    #pragma mapbox: initialize mediump vec4 dasharray_from
+    #pragma mapbox: initialize mediump vec4 dasharray_to
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
