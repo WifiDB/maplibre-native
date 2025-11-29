@@ -113,3 +113,12 @@
 [submodule "vendor/wgpu-native"]
 	path = vendor/wgpu-native
 	url = https://github.com/gfx-rs/wgpu-native.git
+[submodule "platform/linux/vendor/libpng"]
+	path = platform/linux/vendor/libpng
+	url = https://github.com/glennrp/libpng.git
+[submodule "platform/linux/vendor/libjpeg-turbo"]
+	path = platform/linux/vendor/libjpeg-turbo
+	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git
+[submodule "platform/linux/vendor/libwebp"]
+	path = platform/linux/vendor/libwebp
+	url = https://chromium.googlesource.com/webm/libwebp
