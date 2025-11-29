@@ -2,22 +2,7 @@ option(MLN_WITH_X11 "Build with X11 Support" ON)
 option(MLN_WITH_WAYLAND "Build with Wayland Support" OFF)
 option(MLN_STATIC_NODE_DEPS "Statically link dependencies for Node builds" OFF)
 
-find_package(CURL REQUIRED)
-find_package(JPEG REQUIRED)
-find_package(PNG REQUIRED)
-find_package(PkgConfig REQUIRED)
-if (MLN_WITH_X11)
-    find_package(X11 REQUIRED)
-endif ()
-find_package(Threads REQUIRED)
-
-pkg_search_module(WEBP libwebp REQUIRED)
-pkg_search_module(LIBUV libuv REQUIRED)
-pkg_search_module(ICUUC icu-uc)
-pkg_search_module(ICUI18N icu-i18n)
-find_program(ARMERGE NAMES armerge)
-
-# For Node builds with static dependencies, find static versions of libraries to bundle
+# For Node builds with static dependencies, find static versions first
 if(MLN_STATIC_NODE_DEPS)
     message(STATUS "Static Node deps: Configuring static library dependencies")
     set(_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
@@ -43,6 +28,21 @@ if(MLN_STATIC_NODE_DEPS)
         message(STATUS "Static Node deps: ICU DATA=${ICUDATA_STATIC_LIBRARY}")
     endif()
 endif()
+
+find_package(CURL REQUIRED)
+find_package(JPEG REQUIRED)
+find_package(PNG REQUIRED)
+find_package(PkgConfig REQUIRED)
+if (MLN_WITH_X11)
+    find_package(X11 REQUIRED)
+endif ()
+find_package(Threads REQUIRED)
+
+pkg_search_module(WEBP libwebp REQUIRED)
+pkg_search_module(LIBUV libuv REQUIRED)
+pkg_search_module(ICUUC icu-uc)
+pkg_search_module(ICUI18N icu-i18n)
+find_program(ARMERGE NAMES armerge)
 
 if(MLN_WITH_WAYLAND AND NOT MLN_WITH_VULKAN)
     # See https://github.com/maplibre/maplibre-native/pull/2022
