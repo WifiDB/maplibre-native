@@ -40,13 +40,17 @@ void LineBucket::addFeature(const GeometryTileFeature& feature,
         addGeometry(line, feature, canonical);
     }
 
+    // TODO: Pass actual dashPositions from tile worker when implementing data-driven dasharrays
+    // For now, pass empty DashPositions - constant dasharrays work via uniforms in tweaker
+    const DashPositions dashPositions{};
+
     for (auto& pair : paintPropertyBinders) {
         const auto it = patternDependencies.find(pair.first);
         if (it != patternDependencies.end()) {
             pair.second.populateVertexVectors(
-                feature, vertices.elements(), index, patternPositions, it->second, canonical);
+                feature, vertices.elements(), index, patternPositions, dashPositions, it->second, canonical);
         } else {
-            pair.second.populateVertexVectors(feature, vertices.elements(), index, patternPositions, {}, canonical);
+            pair.second.populateVertexVectors(feature, vertices.elements(), index, patternPositions, dashPositions, {}, canonical);
         }
     }
 }

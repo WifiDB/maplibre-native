@@ -136,8 +136,14 @@ void LineLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParameters
 
             .floorwidth = (expressionMask & LineExpressionMask::FloorWidth) ? LineFloorWidth::defaultValue()
                                                                             : evaluate<LineFloorWidth>(parameters),
+            
+            // ADD these lines for dasharray:
+            .dasharray_from = {0.0f, 0.0f, 0.0f, 1.0f},  // Default: will be overridden by attributes
+            .dasharray_to = {0.0f, 0.0f, 0.0f, 1.0f},    // Default: will be overridden by attributes
+            
             .expressionMask = expressionMask,
-            .pad1 = 0};
+            .props_pad1 = 0
+        };
 #elif MLN_RENDER_BACKEND_WEBGPU
         expressionMask = LineExpressionMask::None;
         if (evaluated.get<LineColor>().isConstant()) {
@@ -343,8 +349,11 @@ void LineLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParameters
 
                     const LinePatternPos& posA = dashPatternTexture.getFrom();
                     const LinePatternPos& posB = dashPatternTexture.getTo();
-                    const float widthA = posA.width * crossfade.fromScale;
-                    const float widthB = posB.width * crossfade.toScale;
+                    const float tileRatio = 1.0f / tileID.pixelsToTileUnits(1.0f, zoom);
+                    
+                    // Calculate dasharray vec4s: (unused, y, height, width)
+                    const std::array<float, 4> dasharray_from = {0.0f, posA.y, posA.height, posA.width};
+                    const std::array<float, 4> dasharray_to = {0.0f, posB.y, posB.height, posB.width};
 
 #if MLN_UBO_CONSOLIDATION
                     drawableUBOVector[i].lineSDFDrawableUBO = {
@@ -352,11 +361,7 @@ void LineLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParameters
                     const LineSDFDrawableUBO drawableUBO = {
 #endif
                         .matrix = util::cast<float>(matrix),
-                        .patternscale_a = {1.0f / tileID.pixelsToTileUnits(widthA, intZoom), -posA.height / 2.0f},
-                        .patternscale_b = {1.0f / tileID.pixelsToTileUnits(widthB, intZoom), -posB.height / 2.0f},
-                        .tex_y_a = posA.y,
-                        .tex_y_b = posB.y,
-                        .ratio = 1.0f / tileID.pixelsToTileUnits(1.0f, zoom),
+                        .ratio = tileRatio,
 
                         .color_t = std::get<0>(binders->get<LineColor>()->interpolationFactor(zoom)),
                         .blur_t = std::get<0>(binders->get<LineBlur>()->interpolationFactor(zoom)),
@@ -365,8 +370,10 @@ void LineLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParameters
                         .offset_t = std::get<0>(binders->get<LineOffset>()->interpolationFactor(zoom)),
                         .width_t = std::get<0>(binders->get<LineWidth>()->interpolationFactor(zoom)),
                         .floorwidth_t = std::get<0>(binders->get<LineFloorWidth>()->interpolationFactor(zoom)),
-                        .pad1 = 0,
-                        .pad2 = 0
+                        .dasharray_from_t = 0.0f,  // ADD - not interpolated yet
+                        .dasharray_to_t = 0.0f,    // ADD - not interpolated yet
+                        .drawable_pad1 = 0,
+                        .drawable_pad2 = 0
                     };
 
 #if MLN_UBO_CONSOLIDATION
@@ -374,9 +381,14 @@ void LineLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParameters
 #else
                     const LineSDFTilePropsUBO tilePropsUBO = {
 #endif
-                        .sdfgamma = static_cast<float>(dashPatternTexture.getSize().width) /
-                                    (std::min(widthA, widthB) * 256.0f * parameters.pixelRatio) / 2.0f,
-                        .mix = crossfade.t, .pad1 = 0, .pad2 = 0
+                        .tileratio = tileRatio,
+                        .crossfade_from = crossfade.fromScale,
+                        .crossfade_to = crossfade.toScale,
+                        .lineatlas_width = static_cast<float>(dashPatternTexture.getSize().width),
+                        .lineatlas_height = static_cast<float>(dashPatternTexture.getSize().height),
+                        .mix = crossfade.t,
+                        .tileprops_pad1 = 0,
+                        .tileprops_pad2 = 0
                     };
 
 #if !MLN_UBO_CONSOLIDATION

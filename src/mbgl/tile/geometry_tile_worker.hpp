@@ -22,6 +22,7 @@ namespace mbgl {
 class GeometryTile;
 class GeometryTileData;
 class Layout;
+class LineAtlas;  // ADDED: Forward declaration for LineAtlas
 
 namespace style {
 class Layer;
@@ -44,6 +45,7 @@ public:
                        float pixelRatio,
                        bool showCollisionBoxes_,
                        gfx::DynamicTextureAtlasPtr,
+                       std::shared_ptr<LineAtlas> lineAtlas,  // ADDED: LineAtlas parameter
                        std::shared_ptr<FontFaces> fontFaces);
     ~GeometryTileWorker();
 
@@ -121,6 +123,7 @@ private:
     bool firstLoad = true;
 
     gfx::DynamicTextureAtlasPtr dynamicTextureAtlas;
+    std::shared_ptr<LineAtlas> lineAtlas;  // ADDED: LineAtlas member
 
     std::shared_ptr<FontFaces> fontFaces;
 };

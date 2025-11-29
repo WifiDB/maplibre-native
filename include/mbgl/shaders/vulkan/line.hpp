@@ -266,25 +266,26 @@ struct ShaderSource<BuiltIn::LineGradientShader, gfx::Backend::Type::Vulkan> {
 
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
+layout(location = 2) in vec2 in_uv;
 
 #if !defined(HAS_UNIFORM_u_blur)
-layout(location = 2) in vec2 in_blur;
+layout(location = 3) in vec2 in_blur;
 #endif
 
 #if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 3) in vec2 in_opacity;
+layout(location = 4) in vec2 in_opacity;
 #endif
 
 #if !defined(HAS_UNIFORM_u_gapwidth)
-layout(location = 4) in vec2 in_gapwidth;
+layout(location = 5) in vec2 in_gapwidth;
 #endif
 
 #if !defined(HAS_UNIFORM_u_offset)
-layout(location = 5) in vec2 in_offset;
+layout(location = 6) in vec2 in_offset;
 #endif
 
 #if !defined(HAS_UNIFORM_u_width)
-layout(location = 6) in vec2 in_width;
+layout(location = 7) in vec2 in_width;
 #endif
 
 layout(push_constant) uniform Constants {
@@ -293,7 +294,7 @@ layout(push_constant) uniform Constants {
 
 struct LineGradientDrawableUBO {
     mat4 matrix;
-    mediump float ratio;
+    float ratio;
     // Interpolations
     float blur_t;
     float opacity_t;
@@ -325,7 +326,7 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
 layout(location = 0) out lowp vec2 frag_normal;
 layout(location = 1) out lowp vec2 frag_width2;
 layout(location = 2) out lowp float frag_gamma_scale;
-layout(location = 3) out float frag_lineprogress;
+layout(location = 3) out vec2 frag_uv;
 
 #if !defined(HAS_UNIFORM_u_blur)
 layout(location = 4) out lowp float frag_blur;
@@ -347,9 +348,9 @@ void main() {
 #endif
 
 #ifndef HAS_UNIFORM_u_gapwidth
-    mediump float gapwidth = unpack_mix_float(in_gapwidth, drawable.gapwidth_t) / 2.0;
+    const mediump float gapwidth = unpack_mix_float(in_gapwidth, drawable.gapwidth_t) / 2.0;
 #else
-    mediump float gapwidth = props.gapwidth / 2.0;
+    const mediump float gapwidth = props.gapwidth / 2.0;
 #endif
 
 #ifndef HAS_UNIFORM_u_offset
@@ -371,7 +372,6 @@ void main() {
     vec2 a_extrude = in_data.xy - 128.0;
     float a_direction = mod(in_data.z, 4.0) - 1.0;
     vec2 pos = floor(in_pos_normal * 0.5);
-    frag_lineprogress = (floor(in_data.z / 4.0) + in_data.w * 64.0) * 2.0 / MAX_LINE_DISTANCE;
 
     // x is 1 if it's a round cap, 0 otherwise
     // y is 1 if the normal points up, and -1 if it points down
@@ -408,6 +408,7 @@ void main() {
     frag_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 
     frag_width2 = vec2(outset, inset);
+    frag_uv = in_uv;
 }
 )";
 
@@ -416,7 +417,7 @@ void main() {
 layout(location = 0) in lowp vec2 frag_normal;
 layout(location = 1) in lowp vec2 frag_width2;
 layout(location = 2) in lowp float frag_gamma_scale;
-layout(location = 3) in float frag_lineprogress;
+layout(location = 3) in vec2 frag_uv;
 
 #if !defined(HAS_UNIFORM_u_blur)
 layout(location = 4) in lowp float frag_blur;
@@ -425,8 +426,6 @@ layout(location = 4) in lowp float frag_blur;
 #if !defined(HAS_UNIFORM_u_opacity)
 layout(location = 5) in lowp float frag_opacity;
 #endif
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform sampler2D image0_sampler;
 
 layout(location = 0) out vec4 out_color;
 
@@ -441,6 +440,8 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
     uint expressionMask;
     float pad1;
 } props;
+
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform sampler2D image0_sampler;
 
 void main() {
 
@@ -470,9 +471,7 @@ void main() {
     float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * frag_gamma_scale;
     float alpha = clamp(min(dist - (frag_width2.t - blur2), frag_width2.s - dist) / blur2, 0.0, 1.0);
 
-    // For gradient lines, lineprogress is the ratio along the entire line,
-    // scaled to [0, 2^15), and the gradient ramp is stored in a texture.
-    const vec4 color = texture(image0_sampler, vec2(frag_lineprogress, 0.5));
+    vec4 color = texture(image0_sampler, frag_uv);
 
     out_color = color * (alpha * opacity);
 }
@@ -483,7 +482,7 @@ template <>
 struct ShaderSource<BuiltIn::LinePatternShader, gfx::Backend::Type::Vulkan> {
     static constexpr const char* name = "LinePatternShader";
 
-    static const std::array<AttributeInfo, 9> attributes;
+    static const std::array<AttributeInfo, 10> attributes;
     static constexpr std::array<AttributeInfo, 0> instanceAttributes{};
     static const std::array<TextureInfo, 1> textures;
 
@@ -514,12 +513,14 @@ layout(location = 6) in vec2 in_width;
 #endif
 
 #if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 7) in uvec4 in_pattern_from;
+layout(location = 7) in vec4 in_pattern_from;
 #endif
 
 #if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 8) in uvec4 in_pattern_to;
+layout(location = 8) in vec4 in_pattern_to;
 #endif
+
+layout(location = 9) in vec2 in_tile_units;
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -531,8 +532,8 @@ struct LinePatternDrawableUBO {
     // Interpolations
     float blur_t;
     float opacity_t;
-    float offset_t;
     float gapwidth_t;
+    float offset_t;
     float width_t;
     float pattern_from_t;
     float pattern_to_t;
@@ -543,6 +544,19 @@ struct LinePatternDrawableUBO {
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LinePatternDrawableUBOVector {
     LinePatternDrawableUBO drawable_ubo[];
 } drawableVector;
+
+struct LinePatternTilePropsUBO {
+    vec4 pattern_from;
+    vec4 pattern_to;
+    vec4 scale;
+    vec2 texsize;
+    float fade;
+    float pad2;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LinePatternTilePropsUBOVector {
+    LinePatternTilePropsUBO tile_props_ubo[];
+} tilePropsVector;
 
 layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
     vec4 color;
@@ -559,26 +573,20 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
 layout(location = 0) out lowp vec2 frag_normal;
 layout(location = 1) out lowp vec2 frag_width2;
 layout(location = 2) out lowp float frag_gamma_scale;
-layout(location = 3) out float frag_linesofar;
+layout(location = 3) out vec2 frag_pos_a;
+layout(location = 4) out vec2 frag_pos_b;
 
 #if !defined(HAS_UNIFORM_u_blur)
-layout(location = 4) out lowp float frag_blur;
+layout(location = 5) out lowp float frag_blur;
 #endif
 
 #if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) out lowp float frag_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 6) out mediump vec4 frag_pattern_from;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 7) out mediump vec4 frag_pattern_to;
+layout(location = 6) out lowp float frag_opacity;
 #endif
 
 void main() {
     const LinePatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const LinePatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
 #ifndef HAS_UNIFORM_u_blur
     frag_blur = unpack_mix_float(in_blur, drawable.blur_t);
@@ -586,6 +594,18 @@ void main() {
 
 #ifndef HAS_UNIFORM_u_opacity
     frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
+#endif
+
+#ifndef HAS_UNIFORM_u_pattern_from
+    const vec4 pattern_from = unpack_mix_vec4(in_pattern_from, drawable.pattern_from_t);
+#else
+    const vec4 pattern_from = tileProps.pattern_from;
+#endif
+
+#ifndef HAS_UNIFORM_u_pattern_to
+    const vec4 pattern_to = unpack_mix_vec4(in_pattern_to, drawable.pattern_to_t);
+#else
+    const vec4 pattern_to = tileProps.pattern_to;
 #endif
 
 #ifndef HAS_UNIFORM_u_gapwidth
@@ -606,14 +626,6 @@ void main() {
     mediump float width = props.width;
 #endif
 
-#ifndef HAS_UNIFORM_u_pattern_from
-    frag_pattern_from = in_pattern_from;
-#endif
-
-#ifndef HAS_UNIFORM_u_pattern_to
-    frag_pattern_to = in_pattern_to;
-#endif
-
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
     const float ANTIALIASING = 1.0 / DEVICE_PIXEL_RATIO / 2.0;
@@ -621,6 +633,7 @@ void main() {
 
     vec2 a_extrude = in_data.xy - 128.0;
     float a_direction = mod(in_data.z, 4.0) - 1.0;
+    float linesofar = (floor(in_data.z / 4.0) + in_data.w * 64.0) * LINE_DISTANCE_SCALE;
     vec2 pos = floor(in_pos_normal * 0.5);
 
     // x is 1 if it's a round cap, 0 otherwise
@@ -658,7 +671,17 @@ void main() {
     frag_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 
     frag_width2 = vec2(outset, inset);
-    frag_linesofar = (floor(in_data.z / 4.0) + in_data.w * 64.0) * LINE_DISTANCE_SCALE;
+
+    vec2 pattern_tl_a = pattern_from.xy;
+    vec2 pattern_br_a = pattern_from.zw;
+    vec2 pattern_tl_b = pattern_to.xy;
+    vec2 pattern_br_b = pattern_to.zw;
+
+    float pixelOffsetA = ((linesofar / in_tile_units.y) + frag_normal.y * width / 2.0) / tileProps.scale.x;
+    float pixelOffsetB = ((linesofar / in_tile_units.y) + frag_normal.y * width / 2.0) / tileProps.scale.y;
+
+    frag_pos_a = mix(pattern_tl_a / tileProps.texsize, pattern_br_a / tileProps.texsize, fract(vec2(pixelOffsetA, 0.5)));
+    frag_pos_b = mix(pattern_tl_b / tileProps.texsize, pattern_br_b / tileProps.texsize, fract(vec2(pixelOffsetB, 0.5)));
 }
 )";
 
@@ -667,22 +690,15 @@ void main() {
 layout(location = 0) in lowp vec2 frag_normal;
 layout(location = 1) in lowp vec2 frag_width2;
 layout(location = 2) in lowp float frag_gamma_scale;
-layout(location = 3) in float frag_linesofar;
+layout(location = 3) in vec2 frag_pos_a;
+layout(location = 4) in vec2 frag_pos_b;
 
 #if !defined(HAS_UNIFORM_u_blur)
-layout(location = 4) in lowp float frag_blur;
+layout(location = 5) in lowp float frag_blur;
 #endif
 
 #if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) in lowp float frag_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 6) in mediump vec4 frag_pattern_from;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 7) in mediump vec4 frag_pattern_to;
+layout(location = 6) in lowp float frag_opacity;
 #endif
 
 layout(location = 0) out vec4 out_color;
@@ -691,17 +707,17 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct LinePatternTilePropertiesUBO {
+struct LinePatternTilePropsUBO {
     vec4 pattern_from;
     vec4 pattern_to;
     vec4 scale;
     vec2 texsize;
     float fade;
-    float pad1;
+    float pad2;
 };
 
-layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LinePatternTilePropertiesUBOVector {
-    LinePatternTilePropertiesUBO tile_props_ubo[];
+layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LinePatternTilePropsUBOVector {
+    LinePatternTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
 layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
@@ -725,73 +741,32 @@ void main() {
     return;
 #endif
 
-    const LinePatternTilePropertiesUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const LinePatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
 #ifdef HAS_UNIFORM_u_blur
-    const lowp float blur = props.blur;
+    lowp float blur = props.blur;
 #else
-    const lowp float blur = frag_blur;
+    lowp float blur = frag_blur;
 #endif
 
 #ifdef HAS_UNIFORM_u_opacity
-    const lowp float opacity = props.opacity;
+    lowp float opacity = props.opacity;
 #else
-    const lowp float opacity = frag_opacity;
+    lowp float opacity = frag_opacity;
 #endif
-
-#ifdef HAS_UNIFORM_u_pattern_from
-    const lowp vec4 pattern_from = tileProps.pattern_from;
-#else
-    const lowp vec4 pattern_from = frag_pattern_from;
-#endif
-
-#ifdef HAS_UNIFORM_u_pattern_to
-    const lowp vec4 pattern_to = tileProps.pattern_to;
-#else
-    const lowp vec4 pattern_to = frag_pattern_to;
-#endif
-
-    const vec2 pattern_tl_a = pattern_from.xy;
-    const vec2 pattern_br_a = pattern_from.zw;
-    const vec2 pattern_tl_b = pattern_to.xy;
-    const vec2 pattern_br_b = pattern_to.zw;
-
-    const float pixelRatio = tileProps.scale.x;
-    const float tileZoomRatio = tileProps.scale.y;
-    const float fromScale = tileProps.scale.z;
-    const float toScale = tileProps.scale.w;
-
-    const vec2 display_size_a = vec2((pattern_br_a.x - pattern_tl_a.x) / pixelRatio, (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
-    const vec2 display_size_b = vec2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
-
-    const vec2 pattern_size_a = vec2(display_size_a.x * fromScale / tileZoomRatio, display_size_a.y);
-    const vec2 pattern_size_b = vec2(display_size_b.x * toScale / tileZoomRatio, display_size_b.y);
 
     // Calculate the distance of the pixel from the line in pixels.
-    const float dist = length(frag_normal) * frag_width2.x;
+    float dist = length(frag_normal) * frag_width2.s;
 
     // Calculate the antialiasing fade factor. This is either when fading in
-    // the line in case of an offset line (frag_width2.y) or when fading out
-    // (frag_width2.x)
-    const float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * frag_gamma_scale;
-    const float alpha = clamp(min(dist - (frag_width2.y - blur2), frag_width2.x - dist) / blur2, 0.0, 1.0);
+    // the line in case of an offset line (frag_width2.t) or when fading out
+    // (frag_width2.s)
+    float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * frag_gamma_scale;
+    float alpha = clamp(min(dist - (frag_width2.t - blur2), frag_width2.s - dist) / blur2, 0.0, 1.0);
 
-    const float x_a = mod(frag_linesofar / pattern_size_a.x, 1.0);
-    const float x_b = mod(frag_linesofar / pattern_size_b.x, 1.0);
+    vec4 color = mix(texture(image0_sampler, frag_pos_a), texture(image0_sampler, frag_pos_b), tileProps.fade);
 
-    // frag_normal.y is 0 at the midpoint of the line, -1 at the lower edge, 1 at the upper edge
-    // we clamp the line width outset to be between 0 and half the pattern height plus padding (2.0)
-    // to ensure we don't sample outside the designated symbol on the sprite sheet.
-    // 0.5 is added to shift the component to be bounded between 0 and 1 for interpolation of
-    // the texture coordinate
-    const float y_a = 0.5 + (frag_normal.y * clamp(frag_width2.x, 0.0, (pattern_size_a.y + 2.0) / 2.0) / pattern_size_a.y);
-    const float y_b = 0.5 + (frag_normal.y * clamp(frag_width2.x, 0.0, (pattern_size_b.y + 2.0) / 2.0) / pattern_size_b.y);
-    const vec2 pos_a = mix(pattern_tl_a / tileProps.texsize, pattern_br_a / tileProps.texsize, vec2(x_a, y_a));
-    const vec2 pos_b = mix(pattern_tl_b / tileProps.texsize, pattern_br_b / tileProps.texsize, vec2(x_b, y_b));
-
-    const vec4 color = mix(texture(image0_sampler, pos_a), texture(image0_sampler, pos_b), tileProps.fade);
-
-    out_color = color * (alpha * opacity);
+    out_color = color * alpha * opacity;
 }
 )";
 };
@@ -800,7 +775,7 @@ template <>
 struct ShaderSource<BuiltIn::LineSDFShader, gfx::Backend::Type::Vulkan> {
     static constexpr const char* name = "LineSDFShader";
 
-    static const std::array<AttributeInfo, 9> attributes;
+    static const std::array<AttributeInfo, 11> attributes;
     static constexpr std::array<AttributeInfo, 0> instanceAttributes{};
     static const std::array<TextureInfo, 1> textures;
 
@@ -838,16 +813,20 @@ layout(location = 7) in vec2 in_width;
 layout(location = 8) in vec2 in_floorwidth;
 #endif
 
+#if !defined(HAS_UNIFORM_u_dasharray_from)
+layout(location = 9) in vec4 in_dasharray_from;
+#endif
+
+#if !defined(HAS_UNIFORM_u_dasharray_to)
+layout(location = 10) in vec4 in_dasharray_to;
+#endif
+
 layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
 struct LineSDFDrawableUBO {
     mat4 matrix;
-    vec2 patternscale_a;
-    vec2 patternscale_b;
-    float tex_y_a;
-    float tex_y_b;
     float ratio;
     // Interpolations
     float color_t;
@@ -857,8 +836,10 @@ struct LineSDFDrawableUBO {
     float offset_t;
     float width_t;
     float floorwidth_t;
-    float pad1;
-    float pad2;
+    float dasharray_from_t;
+    float dasharray_to_t;
+    float pad_sdf_drawable_1;
+    float pad_sdf_drawable_2;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineSDFDrawableUBOVector {
@@ -874,8 +855,25 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
     float width;
     float floorwidth;
     uint expressionMask;
-    float pad1;
+    float pad_evaluated_props_1;
+    vec4 dasharray_from;
+    vec4 dasharray_to;
 } props;
+
+struct LineSDFTilePropsUBO {
+    float tileratio;
+    float crossfade_from;
+    float crossfade_to;
+    float lineatlas_width;
+    float lineatlas_height;
+    float mix;
+    float pad_sdf_tileprops_1;
+    float pad_sdf_tileprops_2;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LineSDFTilePropsUBOVector {
+    LineSDFTilePropsUBO tile_props_ubo[];
+} tilePropsVector;
 
 layout(location = 0) out lowp vec2 frag_normal;
 layout(location = 1) out lowp vec2 frag_width2;
@@ -899,8 +897,17 @@ layout(location = 7) out lowp float frag_opacity;
 layout(location = 8) out mediump float frag_floorwidth;
 #endif
 
+#if !defined(HAS_UNIFORM_u_dasharray_from)
+layout(location = 9) out vec4 frag_dasharray_from;
+#endif
+
+#if !defined(HAS_UNIFORM_u_dasharray_to)
+layout(location = 10) out vec4 frag_dasharray_to;
+#endif
+
 void main() {
     const LineSDFDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const LineSDFTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
 #ifndef HAS_UNIFORM_u_color
     frag_color = unpack_mix_color(in_color, drawable.color_t);
@@ -919,6 +926,20 @@ void main() {
     frag_floorwidth = floorwidth;
 #else
     const float floorwidth = props.floorwidth;
+#endif
+
+#ifndef HAS_UNIFORM_u_dasharray_from
+    const vec4 dasharray_from = unpack_mix_vec4(in_dasharray_from, drawable.dasharray_from_t);
+    frag_dasharray_from = dasharray_from;
+#else
+    const vec4 dasharray_from = props.dasharray_from;
+#endif
+
+#ifndef HAS_UNIFORM_u_dasharray_to
+    const vec4 dasharray_to = unpack_mix_vec4(in_dasharray_to, drawable.dasharray_to_t);
+    frag_dasharray_to = dasharray_to;
+#else
+    const vec4 dasharray_to = props.dasharray_to;
 #endif
 
 #ifndef HAS_UNIFORM_u_offset
@@ -985,8 +1006,16 @@ void main() {
 
     frag_width2 = vec2(outset, inset);
 
-    frag_tex_a = vec2(linesofar * drawable.patternscale_a.x / floorwidth, frag_normal.y * drawable.patternscale_a.y + drawable.tex_y_a);
-    frag_tex_b = vec2(linesofar * drawable.patternscale_b.x / floorwidth, frag_normal.y * drawable.patternscale_b.y + drawable.tex_y_b);
+    // Calculate texture coordinates for dash pattern
+    float u_patternscale_a_x = tileProps.tileratio / dasharray_from.w / tileProps.crossfade_from;
+    float u_patternscale_a_y = -dasharray_from.z / 2.0 / tileProps.lineatlas_height;
+    float u_patternscale_b_x = tileProps.tileratio / dasharray_to.w / tileProps.crossfade_to;
+    float u_patternscale_b_y = -dasharray_to.z / 2.0 / tileProps.lineatlas_height;
+    
+    frag_tex_a = vec2(linesofar * u_patternscale_a_x / floorwidth, 
+                      frag_normal.y * u_patternscale_a_y + (dasharray_from.y + 0.5) / tileProps.lineatlas_height);
+    frag_tex_b = vec2(linesofar * u_patternscale_b_x / floorwidth, 
+                      frag_normal.y * u_patternscale_b_y + (dasharray_to.y + 0.5) / tileProps.lineatlas_height);
 }
 )";
 
@@ -1014,6 +1043,14 @@ layout(location = 7) in lowp float frag_opacity;
 layout(location = 8) in mediump float frag_floorwidth;
 #endif
 
+#if !defined(HAS_UNIFORM_u_dasharray_from)
+layout(location = 9) in vec4 frag_dasharray_from;
+#endif
+
+#if !defined(HAS_UNIFORM_u_dasharray_to)
+layout(location = 10) in vec4 frag_dasharray_to;
+#endif
+
 layout(location = 0) out vec4 out_color;
 
 layout(push_constant) uniform Constants {
@@ -1021,13 +1058,14 @@ layout(push_constant) uniform Constants {
 } constant;
 
 struct LineSDFTilePropsUBO {
-    float sdfgamma;
+    float tileratio;
+    float crossfade_from;
+    float crossfade_to;
+    float lineatlas_width;
+    float lineatlas_height;
     float mix;
-    float pad1;
-    float pad2;
-    vec4 pad3;
-    vec4 pad4;
-    vec4 pad5;
+    float pad_sdf_tileprops_1;
+    float pad_sdf_tileprops_2;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LineSDFTilePropsUBOVector {
@@ -1043,7 +1081,9 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
     float width;
     float floorwidth;
     uint expressionMask;
-    float pad1;
+    float pad_evaluated_props_1;
+    vec4 dasharray_from;
+    vec4 dasharray_to;
 } props;
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform sampler2D image0_sampler;
@@ -1081,6 +1121,18 @@ void main() {
     const lowp float floorwidth = frag_floorwidth;
 #endif
 
+#ifdef HAS_UNIFORM_u_dasharray_from
+    const vec4 dasharray_from = props.dasharray_from;
+#else
+    const vec4 dasharray_from = frag_dasharray_from;
+#endif
+
+#ifdef HAS_UNIFORM_u_dasharray_to
+    const vec4 dasharray_to = props.dasharray_to;
+#else
+    const vec4 dasharray_to = frag_dasharray_to;
+#endif
+
     // Calculate the distance of the pixel from the line in pixels.
     const float dist = length(frag_normal) * frag_width2.x;
 
@@ -1091,8 +1143,10 @@ void main() {
     const float sdfdist_a = texture(image0_sampler, frag_tex_a).a;
     const float sdfdist_b = texture(image0_sampler, frag_tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
+    
+    const float sdfgamma = (tileProps.lineatlas_width / 256.0 / DEVICE_PIXEL_RATIO) / min(dasharray_from.w, dasharray_to.w);
     const float alpha = clamp(min(dist - (frag_width2.y - blur2), frag_width2.x - dist) / blur2, 0.0, 1.0) *
-                        smoothstep(0.5 - tileProps.sdfgamma / floorwidth, 0.5 + tileProps.sdfgamma / floorwidth, sdfdist);
+                        smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     out_color = color * (alpha * opacity);
 }

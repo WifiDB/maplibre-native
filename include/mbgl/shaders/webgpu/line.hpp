@@ -219,520 +219,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 template <>
-struct ShaderSource<BuiltIn::LineGradientShader, gfx::Backend::Type::WebGPU> {
-    static constexpr const char* name = "LineGradientShader";
-    static const std::array<AttributeInfo, 7> attributes;
-    static constexpr std::array<AttributeInfo, 0> instanceAttributes{};
-    static const std::array<TextureInfo, 1> textures;
-
-    static constexpr const char* vertex = R"(
-struct VertexInput {
-    @location(4) pos_normal: vec2<i32>,
-    @location(5) data: vec4<u32>,
-    @location(6) blur: vec2<f32>,
-    @location(7) opacity: vec2<f32>,
-    @location(8) gapwidth: vec2<f32>,
-    @location(9) offset: vec2<f32>,
-    @location(10) width: vec2<f32>,
-};
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) v_width2: vec2<f32>,
-    @location(1) v_normal: vec2<f32>,
-    @location(2) v_gamma_scale: f32,
-    @location(3) v_lineprogress: f32,
-    @location(4) v_blur: f32,
-    @location(5) v_opacity: f32,
-};
-
-struct LineGradientDrawableUBO {
-    matrix: mat4x4<f32>,
-    ratio: f32,
-    blur_t: f32,
-    opacity_t: f32,
-    gapwidth_t: f32,
-    offset_t: f32,
-    width_t: f32,
-    pad1: f32,
-    pad2: f32,
-};
-
-const LINE_EXPRESSION_COLOR: u32 = 1u << 0u;
-const LINE_EXPRESSION_OPACITY: u32 = 1u << 1u;
-const LINE_EXPRESSION_BLUR: u32 = 1u << 2u;
-const LINE_EXPRESSION_WIDTH: u32 = 1u << 3u;
-const LINE_EXPRESSION_GAPWIDTH: u32 = 1u << 4u;
-const LINE_EXPRESSION_FLOORWIDTH: u32 = 1u << 5u;
-const LINE_EXPRESSION_OFFSET: u32 = 1u << 6u;
-
-struct LineEvaluatedPropsUBO {
-    color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
-    width: f32,
-    floorwidth: f32,
-    expressionMask: u32,
-    pad1: f32,
-};
-
-struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    symbol_fade_change: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    map_zoom: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-struct LineGradientDrawableEntry {
-    data: LineGradientDrawableUBO,
-    pad0: vec4<f32>,
-    pad1: vec4<f32>,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(2) var<storage, read> drawableVector: array<LineGradientDrawableEntry>;
-@group(0) @binding(4) var<uniform> props: LineEvaluatedPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-
-@vertex
-fn main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-    let drawable = drawableVector[globalIndex.value].data;
-    let mask = props.expressionMask;
-
-    // Constants
-    let pixel_ratio = max(paintParams.pixel_ratio, 1e-6);
-    let antialiasing = 0.5 / pixel_ratio;
-    let MAX_LINE_DISTANCE = 32767.0;
-
-    // Unpack vertex data
-    let a_extrude = vec2<f32>(f32(in.data.x), f32(in.data.y)) - 128.0;
-    let a_direction = f32(in.data.z % 4u) - 1.0;
-    let v_lineprogress = (f32(in.data.z / 4u) + f32(in.data.w) * 64.0) * 2.0 / MAX_LINE_DISTANCE;
-
-    // Unpack position and normal
-    let pos = floor(vec2<f32>(f32(in.pos_normal.x), f32(in.pos_normal.y)) * 0.5);
-    let normal = vec2<f32>(f32(in.pos_normal.x), f32(in.pos_normal.y)) - 2.0 * pos;
-    let v_normal = vec2<f32>(normal.x, normal.y * 2.0 - 1.0);
-
-    // Unpack attributes using helper functions
-    var blur = unpack_mix_float(in.blur, drawable.blur_t);
-    if ((mask & LINE_EXPRESSION_BLUR) != 0u) {
-        blur = props.blur;
-    }
-
-    var opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-    if ((mask & LINE_EXPRESSION_OPACITY) != 0u) {
-        opacity = props.opacity;
-    }
-
-    var gapwidth = unpack_mix_float(in.gapwidth, drawable.gapwidth_t);
-    if ((mask & LINE_EXPRESSION_GAPWIDTH) != 0u) {
-        gapwidth = props.gapwidth;
-    }
-    gapwidth = gapwidth / 2.0;
-
-    var offset = unpack_mix_float(in.offset, drawable.offset_t);
-    if ((mask & LINE_EXPRESSION_OFFSET) != 0u) {
-        offset = props.offset;
-    }
-    offset = -offset;
-
-    var width = unpack_mix_float(in.width, drawable.width_t);
-    if ((mask & LINE_EXPRESSION_WIDTH) != 0u) {
-        width = props.width;
-    }
-
-    let halfwidth = width / 2.0;
-    let inset = gapwidth + select(0.0, antialiasing, gapwidth > 0.0);
-    let outset = gapwidth + halfwidth * select(1.0, 2.0, gapwidth > 0.0) +
-                 select(0.0, antialiasing, halfwidth != 0.0);
-
-    // Scale the extrusion vector down to a normal and then up by the line width
-    let dist = outset * a_extrude * LINE_NORMAL_SCALE;
-
-    // Calculate the offset
-    let u = 0.5 * a_direction;
-    let t = 1.0 - abs(u);
-    let offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * mat2x2<f32>(t, -u, u, t);
-
-    let projected_extrude = drawable.matrix * vec4<f32>(dist / drawable.ratio, 0.0, 0.0);
-    let position = drawable.matrix * vec4<f32>(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
-
-    // Calculate gamma scale
-    let extrude_length_without_perspective = length(dist);
-    let extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
-
-    out.position = position;
-    out.v_width2 = vec2<f32>(outset, inset);
-    out.v_normal = v_normal;
-    out.v_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
-    out.v_lineprogress = v_lineprogress;
-    out.v_blur = blur;
-    out.v_opacity = opacity;
-
-    return out;
-}
-)";
-
-    static constexpr const char* fragment = R"(
-struct FragmentInput {
-    @location(0) v_width2: vec2<f32>,
-    @location(1) v_normal: vec2<f32>,
-    @location(2) v_gamma_scale: f32,
-    @location(3) v_lineprogress: f32,
-    @location(4) v_blur: f32,
-    @location(5) v_opacity: f32,
-};
-
-struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    symbol_fade_change: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    map_zoom: f32,
-    pad1: f32,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(1) @binding(0) var gradient_sampler: sampler;
-@group(1) @binding(1) var gradient_texture: texture_2d<f32>;
-
-@fragment
-fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-    // Calculate the distance of the pixel from the line
-    let dist = length(in.v_normal) * in.v_width2.x;
-
-    // Calculate the antialiasing fade factor
-    let pixel_ratio = max(paintParams.pixel_ratio, 1e-6);
-    let blur2 = (in.v_blur + 1.0 / pixel_ratio) * in.v_gamma_scale;
-    let alpha = clamp(min(dist - (in.v_width2.y - blur2), in.v_width2.x - dist) / blur2, 0.0, 1.0);
-
-    // Sample gradient texture
-    let color = textureSample(gradient_texture, gradient_sampler, vec2<f32>(in.v_lineprogress, 0.5));
-
-    return color * (alpha * in.v_opacity);
-}
-)";
-};
-
-template <>
-struct ShaderSource<BuiltIn::LinePatternShader, gfx::Backend::Type::WebGPU> {
-    static constexpr const char* name = "LinePatternShader";
-    static const std::array<AttributeInfo, 9> attributes;
-    static constexpr std::array<AttributeInfo, 0> instanceAttributes{};
-    static const std::array<TextureInfo, 1> textures;
-
-    static constexpr const char* vertex = R"(
-struct VertexInput {
-    @location(4) pos_normal: vec2<i32>,
-    @location(5) data: vec4<u32>,
-    @location(6) blur: vec2<f32>,
-    @location(7) opacity: vec2<f32>,
-    @location(8) gapwidth: vec2<f32>,
-    @location(9) offset: vec2<f32>,
-    @location(10) width: vec2<f32>,
-    @location(11) pattern_from: vec4<u32>,
-    @location(12) pattern_to: vec4<u32>,
-};
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) v_width2: vec2<f32>,
-    @location(1) v_normal: vec2<f32>,
-    @location(2) v_gamma_scale: f32,
-    @location(3) v_linesofar: f32,
-    @location(4) v_blur: f32,
-    @location(5) v_opacity: f32,
-    @location(6) v_pattern_from: vec4<f32>,
-    @location(7) v_pattern_to: vec4<f32>,
-};
-
-struct LinePatternDrawableUBO {
-    matrix: mat4x4<f32>,
-    ratio: f32,
-    blur_t: f32,
-    opacity_t: f32,
-    gapwidth_t: f32,
-    offset_t: f32,
-    width_t: f32,
-    pattern_from_t: f32,
-    pattern_to_t: f32,
-};
-
-struct LinePatternTilePropsUBO {
-    pattern_from: vec4<f32>,
-    pattern_to: vec4<f32>,
-    scale: vec4<f32>,
-    texsize: vec2<f32>,
-    fade: f32,
-    pad2: f32,
-};
-
-struct LineEvaluatedPropsUBO {
-    color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
-    width: f32,
-    floorwidth: f32,
-    expressionMask: u32,
-    pad1: f32,
-};
-
-struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    symbol_fade_change: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    map_zoom: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-struct LinePatternDrawableEntry {
-    data: LinePatternDrawableUBO,
-    pad0: vec4<f32>,
-    pad1: vec4<f32>,
-};
-
-struct LinePatternTilePropsEntry {
-    data: LinePatternTilePropsUBO,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(2) var<storage, read> drawableVector: array<LinePatternDrawableEntry>;
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<LinePatternTilePropsEntry>;
-@group(0) @binding(4) var<uniform> props: LineEvaluatedPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-
-@vertex
-fn main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-    let index = globalIndex.value;
-    let drawable = drawableVector[index].data;
-    let tileProps = tilePropsVector[index].data;
-
-    let ratio = max(drawable.ratio, 1e-6);
-    let antialiasing = 0.5 / paintParams.pixel_ratio;
-    let lineDistanceScale = 2.0;
-
-    let a_extrude = vec2<f32>(f32(in.data.x), f32(in.data.y)) - 128.0;
-    let a_direction = f32(in.data.z & 3u) - 1.0;
-    let v_linesofar = (floor(f32(in.data.z) * 0.25) + f32(in.data.w) * 64.0) * lineDistanceScale;
-
-    let raw_pos = vec2<f32>(f32(in.pos_normal.x), f32(in.pos_normal.y));
-    let pos = floor(raw_pos * 0.5);
-    let normal = raw_pos - 2.0 * pos;
-    let v_normal = vec2<f32>(normal.x, normal.y * 2.0 - 1.0);
-
-    var blur = props.blur;
-#ifndef HAS_UNIFORM_u_blur
-    blur = unpack_mix_float(in.blur, drawable.blur_t);
-#endif
-
-    var opacity = props.opacity;
-#ifndef HAS_UNIFORM_u_opacity
-    opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-#endif
-
-    var gapwidth = props.gapwidth;
-#ifndef HAS_UNIFORM_u_gapwidth
-    gapwidth = unpack_mix_float(in.gapwidth, drawable.gapwidth_t);
-#endif
-    gapwidth = gapwidth * 0.5;
-
-    var offset = props.offset;
-#ifndef HAS_UNIFORM_u_offset
-    offset = unpack_mix_float(in.offset, drawable.offset_t);
-#endif
-    offset = -offset;
-
-    var width = props.width;
-#ifndef HAS_UNIFORM_u_width
-    width = unpack_mix_float(in.width, drawable.width_t);
-#endif
-
-    var pattern_from = tileProps.pattern_from;
-#ifndef HAS_UNIFORM_u_pattern_from
-    pattern_from = vec4<f32>(in.pattern_from);
-#endif
-    var pattern_to = tileProps.pattern_to;
-#ifndef HAS_UNIFORM_u_pattern_to
-    pattern_to = vec4<f32>(in.pattern_to);
-#endif
-
-    let halfwidth = width * 0.5;
-    let inset = gapwidth + select(0.0, antialiasing, gapwidth > 0.0);
-    let outset = gapwidth + halfwidth * select(1.0, 2.0, gapwidth > 0.0) + select(0.0, antialiasing, halfwidth != 0.0);
-
-    let dist = outset * a_extrude * LINE_NORMAL_SCALE;
-
-    let u = 0.5 * a_direction;
-    let t = 1.0 - abs(u);
-    let offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * mat2x2<f32>(t, -u, u, t);
-
-    let projected_extrude = drawable.matrix * vec4<f32>(dist / ratio, 0.0, 0.0);
-    let position = drawable.matrix * vec4<f32>(pos + offset2 / ratio, 0.0, 1.0) + projected_extrude;
-
-    let extrude_length_without_perspective = length(dist);
-    let extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
-    let gamma_scale = extrude_length_without_perspective / max(extrude_length_with_perspective, 1e-6);
-
-    out.position = position;
-    out.v_width2 = vec2<f32>(outset, inset);
-    out.v_normal = v_normal;
-    out.v_gamma_scale = gamma_scale;
-    out.v_linesofar = v_linesofar;
-    out.v_blur = blur;
-    out.v_opacity = opacity;
-    out.v_pattern_from = pattern_from;
-    out.v_pattern_to = pattern_to;
-
-    return out;
-}
-)";
-
-    static constexpr const char* fragment = R"(
-struct FragmentInput {
-    @location(0) v_width2: vec2<f32>,
-    @location(1) v_normal: vec2<f32>,
-    @location(2) v_gamma_scale: f32,
-    @location(3) v_linesofar: f32,
-    @location(4) v_blur: f32,
-    @location(5) v_opacity: f32,
-    @location(6) v_pattern_from: vec4<f32>,
-    @location(7) v_pattern_to: vec4<f32>,
-};
-
-struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    symbol_fade_change: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    map_zoom: f32,
-    pad1: f32,
-};
-
-struct LinePatternTilePropsUBO {
-    pattern_from: vec4<f32>,
-    pattern_to: vec4<f32>,
-    scale: vec4<f32>,
-    texsize: vec2<f32>,
-    fade: f32,
-    pad2: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-struct LinePatternTilePropsEntry {
-    data: LinePatternTilePropsUBO,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<LinePatternTilePropsEntry>;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(1) @binding(0) var pattern_sampler: sampler;
-@group(1) @binding(1) var pattern_texture: texture_2d<f32>;
-
-@fragment
-fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-    let tileProps = tilePropsVector[globalIndex.value].data;
-
-    var pattern_from = in.v_pattern_from;
-#ifdef HAS_UNIFORM_u_pattern_from
-    pattern_from = tileProps.pattern_from;
-#endif
-    var pattern_to = in.v_pattern_to;
-#ifdef HAS_UNIFORM_u_pattern_to
-    pattern_to = tileProps.pattern_to;
-#endif
-
-    let pattern_tl_a = pattern_from.xy;
-    let pattern_br_a = pattern_from.zw;
-    let pattern_tl_b = pattern_to.xy;
-    let pattern_br_b = pattern_to.zw;
-
-    let pixelRatio = tileProps.scale.x;
-    let tileZoomRatio = max(tileProps.scale.y, 1e-6);
-    let fromScale = tileProps.scale.z;
-    let toScale = tileProps.scale.w;
-
-    let display_size_a = vec2<f32>((pattern_br_a.x - pattern_tl_a.x) / pixelRatio,
-                                   (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
-    let display_size_b = vec2<f32>((pattern_br_b.x - pattern_tl_b.x) / pixelRatio,
-                                   (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
-
-    let pattern_size_a = vec2<f32>(display_size_a.x * fromScale / tileZoomRatio, display_size_a.y);
-    let pattern_size_b = vec2<f32>(display_size_b.x * toScale / tileZoomRatio, display_size_b.y);
-
-    let dist = length(in.v_normal) * in.v_width2.x;
-    let blur = in.v_blur;
-    let opacity = in.v_opacity;
-    let invPixelRatio = 1.0 / max(paintParams.pixel_ratio, 1e-6);
-    let blur2 = (blur + invPixelRatio) * in.v_gamma_scale;
-    let alpha = clamp(min(dist - (in.v_width2.y - blur2), in.v_width2.x - dist) / blur2, 0.0, 1.0);
-
-    let patternSizeAX = max(pattern_size_a.x, 1e-6);
-    let patternSizeBX = max(pattern_size_b.x, 1e-6);
-    let patternSizeAY = max(pattern_size_a.y, 1e-6);
-    let patternSizeBY = max(pattern_size_b.y, 1e-6);
-
-    let x_a = glMod(in.v_linesofar / patternSizeAX, 1.0);
-    let x_b = glMod(in.v_linesofar / patternSizeBX, 1.0);
-
-    let clampedA = clamp(in.v_width2.x, 0.0, (pattern_size_a.y + 2.0) * 0.5);
-    let clampedB = clamp(in.v_width2.x, 0.0, (pattern_size_b.y + 2.0) * 0.5);
-
-    let y_a = clamp(0.5 + (in.v_normal.y * clampedA / patternSizeAY), 0.0, 1.0);
-    let y_b = clamp(0.5 + (in.v_normal.y * clampedB / patternSizeBY), 0.0, 1.0);
-
-    let pos_a = mix(pattern_tl_a / tileProps.texsize, pattern_br_a / tileProps.texsize, vec2<f32>(x_a, y_a));
-    let pos_b = mix(pattern_tl_b / tileProps.texsize, pattern_br_b / tileProps.texsize, vec2<f32>(x_b, y_b));
-
-    let color_a = textureSample(pattern_texture, pattern_sampler, pos_a);
-    let color_b = textureSample(pattern_texture, pattern_sampler, pos_b);
-
-    let pattern_color = mix(color_a, color_b, tileProps.fade);
-
-    return pattern_color * (alpha * opacity);
-}
-)";
-};
-
-template <>
 struct ShaderSource<BuiltIn::LineSDFShader, gfx::Backend::Type::WebGPU> {
     static constexpr const char* name = "LineSDFShader";
-    static const std::array<AttributeInfo, 9> attributes;
+    static const std::array<AttributeInfo, 11> attributes;
     static constexpr std::array<AttributeInfo, 0> instanceAttributes{};
     static const std::array<TextureInfo, 1> textures;
 
@@ -747,6 +236,8 @@ struct VertexInput {
     @location(10) offset: vec2<f32>,
     @location(11) width: vec2<f32>,
     @location(12) floorwidth: vec2<f32>,
+    @location(13) dasharray_from: vec4<f32>,
+    @location(14) dasharray_to: vec4<f32>,
 };
 
 struct VertexOutput {
@@ -760,14 +251,12 @@ struct VertexOutput {
     @location(6) v_blur: f32,
     @location(7) v_opacity: f32,
     @location(8) v_floorwidth: f32,
+    @location(9) v_dasharray_from: vec4<f32>,
+    @location(10) v_dasharray_to: vec4<f32>,
 };
 
 struct LineSDFDrawableUBO {
     matrix: mat4x4<f32>,
-    patternscale_a: vec2<f32>,
-    patternscale_b: vec2<f32>,
-    tex_y_a: f32,
-    tex_y_b: f32,
     ratio: f32,
     color_t: f32,
     blur_t: f32,
@@ -776,8 +265,10 @@ struct LineSDFDrawableUBO {
     offset_t: f32,
     width_t: f32,
     floorwidth_t: f32,
-    pad1: f32,
-    pad2: f32,
+    dasharray_from_t: f32,
+    dasharray_to_t: f32,
+    pad_sdf_drawable_1: f32,
+    pad_sdf_drawable_2: f32,
 };
 
 const LINE_EXPRESSION_COLOR: u32 = 1u << 0u;
@@ -787,12 +278,18 @@ const LINE_EXPRESSION_WIDTH: u32 = 1u << 3u;
 const LINE_EXPRESSION_GAPWIDTH: u32 = 1u << 4u;
 const LINE_EXPRESSION_FLOORWIDTH: u32 = 1u << 5u;
 const LINE_EXPRESSION_OFFSET: u32 = 1u << 6u;
+const LINE_EXPRESSION_DASHARRAY_FROM: u32 = 1u << 7u;
+const LINE_EXPRESSION_DASHARRAY_TO: u32 = 1u << 8u;
 
 struct LineSDFTilePropsUBO {
-    sdfgamma: f32,
+    tileratio: f32,
+    crossfade_from: f32,
+    crossfade_to: f32,
+    lineatlas_width: f32,
+    lineatlas_height: f32,
     mix: f32,
-    pad1: f32,
-    pad2: f32,
+    pad_sdf_tileprops_1: f32,
+    pad_sdf_tileprops_2: f32,
 };
 
 struct LineEvaluatedPropsUBO {
@@ -804,7 +301,9 @@ struct LineEvaluatedPropsUBO {
     width: f32,
     floorwidth: f32,
     expressionMask: u32,
-    pad1: f32,
+    pad_evaluated_props_1: f32,
+    dasharray_from: vec4<f32>,
+    dasharray_to: vec4<f32>,
 };
 
 struct GlobalPaintParamsUBO {
@@ -900,6 +399,18 @@ fn main(in: VertexInput) -> VertexOutput {
         floorwidth = props.floorwidth;
     }
 
+    var dasharray_from: vec4<f32>;
+    dasharray_from = in.dasharray_from;
+#ifdef HAS_UNIFORM_u_dasharray_from
+    dasharray_from = props.dasharray_from;
+#endif
+
+    var dasharray_to: vec4<f32>;
+    dasharray_to = in.dasharray_to;
+#ifdef HAS_UNIFORM_u_dasharray_to
+    dasharray_to = props.dasharray_to;
+#endif
+
     let pixel_ratio = max(paintParams.pixel_ratio, 1e-6);
     let antialiasing = 0.5 / pixel_ratio;
 
@@ -924,13 +435,18 @@ fn main(in: VertexInput) -> VertexOutput {
     let extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
 
     // Calculate texture coordinates
+    let u_patternscale_a_x = tileProps.tileratio / dasharray_from.w / tileProps.crossfade_from;
+    let u_patternscale_a_y = -dasharray_from.z / 2.0 / tileProps.lineatlas_height;
+    let u_patternscale_b_x = tileProps.tileratio / dasharray_to.w / tileProps.crossfade_to;
+    let u_patternscale_b_y = -dasharray_to.z / 2.0 / tileProps.lineatlas_height;
+
     let tex_a = vec2<f32>(
-        v_linesofar * drawable.patternscale_a.x / floorwidth,
-        v_normal.y * drawable.patternscale_a.y + drawable.tex_y_a
+        v_linesofar * u_patternscale_a_x / floorwidth,
+        v_normal.y * u_patternscale_a_y + (dasharray_from.y + 0.5) / tileProps.lineatlas_height
     );
     let tex_b = vec2<f32>(
-        v_linesofar * drawable.patternscale_b.x / floorwidth,
-        v_normal.y * drawable.patternscale_b.y + drawable.tex_y_b
+        v_linesofar * u_patternscale_b_x / floorwidth,
+        v_normal.y * u_patternscale_b_y + (dasharray_to.y + 0.5) / tileProps.lineatlas_height
     );
 
     out.position = position;
@@ -943,6 +459,8 @@ fn main(in: VertexInput) -> VertexOutput {
     out.v_blur = blur;
     out.v_opacity = opacity;
     out.v_floorwidth = floorwidth;
+    out.v_dasharray_from = dasharray_from;
+    out.v_dasharray_to = dasharray_to;
 
     return out;
 }
@@ -959,13 +477,19 @@ struct FragmentInput {
     @location(6) v_blur: f32,
     @location(7) v_opacity: f32,
     @location(8) v_floorwidth: f32,
+    @location(9) v_dasharray_from: vec4<f32>,
+    @location(10) v_dasharray_to: vec4<f32>,
 };
 
 struct LineSDFTilePropsUBO {
-    sdfgamma: f32,
+    tileratio: f32,
+    crossfade_from: f32,
+    crossfade_to: f32,
+    lineatlas_width: f32,
+    lineatlas_height: f32,
     mix: f32,
-    pad1: f32,
-    pad2: f32,
+    pad_sdf_tileprops_1: f32,
+    pad_sdf_tileprops_2: f32,
 };
 
 struct GlobalPaintParamsUBO {
@@ -992,8 +516,23 @@ struct LineSDFTilePropsEntry {
     pad2: vec4<f32>,
 };
 
+struct LineEvaluatedPropsUBO {
+    color: vec4<f32>,
+    blur: f32,
+    opacity: f32,
+    gapwidth: f32,
+    offset: f32,
+    width: f32,
+    floorwidth: f32,
+    expressionMask: u32,
+    pad_evaluated_props_1: f32,
+    dasharray_from: vec4<f32>,
+    dasharray_to: vec4<f32>,
+};
+
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsEntry>;
+@group(0) @binding(4) var<uniform> props: LineEvaluatedPropsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(1) @binding(0) var sdf_sampler: sampler;
 @group(1) @binding(1) var sdf_texture: texture_2d<f32>;
@@ -1001,6 +540,16 @@ struct LineSDFTilePropsEntry {
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let tileProps = tilePropsVector[globalIndex.value].data;
+
+    var dasharray_from = in.v_dasharray_from;
+#ifdef HAS_UNIFORM_u_dasharray_from
+    dasharray_from = props.dasharray_from;
+#endif
+
+    var dasharray_to = in.v_dasharray_to;
+#ifdef HAS_UNIFORM_u_dasharray_to
+    dasharray_to = props.dasharray_to;
+#endif
 
     // Calculate the distance of the pixel from the line
     let dist = length(in.v_normal) * in.v_width2.x;
@@ -1015,8 +564,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let dist_b = textureSample(sdf_texture, sdf_sampler, in.v_tex_b).r;
     let sdfdist = mix(dist_a, dist_b, tileProps.mix);
 
-    // Calculate SDF alpha
-    let sdf_alpha = smoothstep(0.5 - tileProps.sdfgamma / in.v_floorwidth, 0.5 + tileProps.sdfgamma / in.v_floorwidth, sdfdist);
+    // Calculate SDF alpha with dynamic sdfgamma
+    let sdfgamma = (tileProps.lineatlas_width / 256.0 / pixel_ratio) / min(dasharray_from.w, dasharray_to.w);
+    let sdf_alpha = smoothstep(0.5 - sdfgamma / in.v_floorwidth, 0.5 + sdfgamma / in.v_floorwidth, sdfdist);
 
     return in.v_color * (alpha * in.v_opacity * sdf_alpha);
 }

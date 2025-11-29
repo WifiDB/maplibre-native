@@ -175,6 +175,7 @@ MLN_CORE_SOURCE = [
     "src/mbgl/layout/circle_layout.hpp",
     "src/mbgl/layout/clip_lines.cpp",
     "src/mbgl/layout/clip_lines.hpp",
+    "src/mbgl/layout/line_dash_util.hpp",
     "src/mbgl/layout/layout.hpp",
     "src/mbgl/layout/merge_lines.cpp",
     "src/mbgl/layout/merge_lines.hpp",

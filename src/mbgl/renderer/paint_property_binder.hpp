@@ -26,6 +26,16 @@ struct FeatureVertexRange {
 
 using FeatureVertexRangeMap = std::map<std::string, std::vector<FeatureVertexRange>>;
 
+// Structure to hold dash atlas entries
+struct DashEntry {
+    float y;        // Y position in line atlas
+    float height;   // Height of dash pattern
+    float width;    // Width of dash pattern
+};
+
+// Map from dash key (e.g., "2,1,false") to atlas entry
+using DashPositions = std::map<std::string, DashEntry>;
+
 /*
    ZoomInterpolatedAttribute<Attr> is a 'compound' attribute, representing two
    values of the the base attribute Attr.  These two values are provided to the
@@ -108,12 +118,13 @@ public:
     virtual ~PaintPropertyBinder() = default;
 
     virtual void populateVertexVector(const GeometryTileFeature& feature,
-                                      std::size_t length,
-                                      std::size_t index,
-                                      const ImagePositions&,
-                                      const std::optional<PatternDependency>&,
-                                      const CanonicalTileID& canonical,
-                                      const style::expression::Value&) = 0;
+                                  std::size_t length,
+                                  std::size_t index,
+                                  const ImagePositions& patternPositions,
+                                  const DashPositions& dashPositions,  // ADD THIS
+                                  const std::optional<PatternDependency>& patternDependency,
+                                  const CanonicalTileID& canonical,
+                                  const style::expression::Value& formattedSection) = 0;
 
     virtual void updateVertexVectors(const FeatureStates&, const GeometryTileLayer&, const ImagePositions&) {}
 
@@ -154,6 +165,7 @@ public:
                               std::size_t,
                               std::size_t,
                               const ImagePositions&,
+                              const DashPositions&,
                               const std::optional<PatternDependency>&,
                               const CanonicalTileID&,
                               const style::expression::Value&) override {}
@@ -197,6 +209,7 @@ public:
                               std::size_t,
                               std::size_t,
                               const ImagePositions&,
+                              const DashPositions&,
                               const std::optional<PatternDependency>&,
                               const CanonicalTileID&,
                               const style::expression::Value&) override {}
@@ -251,6 +264,7 @@ public:
                               std::size_t length,
                               std::size_t index,
                               const ImagePositions&,
+                              const DashPositions&,
                               const std::optional<PatternDependency>&,
                               const CanonicalTileID& canonical,
                               const style::expression::Value& formattedSection) override {
@@ -356,6 +370,7 @@ public:
                               std::size_t length,
                               std::size_t index,
                               const ImagePositions&,
+                              const DashPositions&,
                               const std::optional<PatternDependency>&,
                               const CanonicalTileID& canonical,
                               const style::expression::Value& formattedSection) override {
@@ -489,11 +504,114 @@ public:
                               std::size_t length,
                               std::size_t /* index */,
                               const ImagePositions& patternPositions,
+                              const DashPositions& dashPositions,  // ADDED
                               const std::optional<PatternDependency>& patternDependencies,
                               const CanonicalTileID&,
                               const style::expression::Value&) override {
+        
+        // Detect if this is a dasharray property by checking the attribute type
+        constexpr bool isDasharray = std::is_same_v<BaseAttributeType, 
+            gfx::AttributeType<float, 4>> && 
+            !std::is_same_v<T, expression::Image>;
+        
+        if (isDasharray) {
+            populateDasharrayVertices(length, dashPositions, patternDependencies);
+        } else {
+            populatePatternVertices(length, patternPositions, patternDependencies);
+        }
+    }
+
+    void updateVertexVector(std::size_t, std::size_t, const GeometryTileFeature&, const FeatureState&) override {}
+
+    std::tuple<float, float> interpolationFactor(float) const override { 
+        return std::tuple<float, float>{0.0f, 0.0f}; 
+    }
+
+    std::tuple<std::array<uint16_t, 4>, std::array<uint16_t, 4>> uniformValue(
+        const PossiblyEvaluatedPropertyValue<Faded<T>>&) const override {
+        // Uniform values for vertex attribute arrays are unused.
+        return {};
+    }
+
+    std::size_t getVertexCount() const override { return patternToVertexVector.elements(); }
+
+    std::tuple<ZoomInterpolatedVertexType<A1>, ZoomInterpolatedVertexType<A2>> getVertexValue(
+        std::size_t index) const override {
+        const Vertex& patternValue = patternToVertexVector.at(index);
+        const Vertex2& zoomValue = crossfade.fromScale == 2 ? zoomInVertexVector.at(index)
+                                                            : zoomOutVertexVector.at(index);
+        return {ZoomInterpolatedVertexType<A1>{concatenate(patternValue.a1, patternValue.a1)},
+                ZoomInterpolatedVertexType<A2>{concatenate(zoomValue.a1, zoomValue.a1)}};
+    }
+
+    gfx::VertexVectorBasePtr getSharedVertexVector() const override { return sharedPatternToVertexVector; }
+
+private:
+    // Handle dasharray vertex population
+    void populateDasharrayVertices(std::size_t length,
+                                   const DashPositions& dashPositions,
+                                   const std::optional<PatternDependency>& patternDependencies) {
         if (!patternDependencies || patternDependencies->mid.empty()) {
-            // Unlike other propperties with expressions that evaluate to null,
+            // No dasharray - use default (solid line)
+            std::array<float, 4> defaultDash = {0.0f, 0.0f, 0.0f, 1.0f};
+            for (std::size_t i = zoomInVertexVector.elements(); i < length; ++i) {
+                patternToVertexVector.emplace_back(Vertex{defaultDash});
+                zoomInVertexVector.emplace_back(Vertex2{defaultDash});
+                zoomOutVertexVector.emplace_back(Vertex2{defaultDash});
+            }
+            return;
+        }
+
+        if (dashPositions.empty()) {
+            // Dash positions not provided - use defaults
+            std::array<float, 4> defaultDash = {0.0f, 0.0f, 0.0f, 1.0f};
+            for (std::size_t i = zoomInVertexVector.elements(); i < length; ++i) {
+                patternToVertexVector.emplace_back(Vertex{defaultDash});
+                zoomInVertexVector.emplace_back(Vertex2{defaultDash});
+                zoomOutVertexVector.emplace_back(Vertex2{defaultDash});
+            }
+            return;
+        }
+
+        // Look up dash entries
+        const auto minIt = dashPositions.find(patternDependencies->min);
+        const auto midIt = dashPositions.find(patternDependencies->mid);
+        const auto maxIt = dashPositions.find(patternDependencies->max);
+
+        const auto end = dashPositions.end();
+        if (minIt == end || midIt == end || maxIt == end) {
+            // Dash not found - use default
+            std::array<float, 4> defaultDash = {0.0f, 0.0f, 0.0f, 1.0f};
+            for (std::size_t i = zoomInVertexVector.elements(); i < length; ++i) {
+                patternToVertexVector.emplace_back(Vertex{defaultDash});
+                zoomInVertexVector.emplace_back(Vertex2{defaultDash});
+                zoomOutVertexVector.emplace_back(Vertex2{defaultDash});
+            }
+            return;
+        }
+
+        const DashEntry& dashMin = minIt->second;
+        const DashEntry& dashMid = midIt->second;
+        const DashEntry& dashMax = maxIt->second;
+
+        // Pack as vec4: (unused, y, height, width)
+        std::array<float, 4> dashMinVec = {0.0f, dashMin.y, dashMin.height, dashMin.width};
+        std::array<float, 4> dashMidVec = {0.0f, dashMid.y, dashMid.height, dashMid.width};
+        std::array<float, 4> dashMaxVec = {0.0f, dashMax.y, dashMax.height, dashMax.width};
+
+        for (std::size_t i = zoomInVertexVector.elements(); i < length; ++i) {
+            patternToVertexVector.emplace_back(Vertex{dashMidVec});
+            zoomInVertexVector.emplace_back(Vertex2{dashMinVec});
+            zoomOutVertexVector.emplace_back(Vertex2{dashMaxVec});
+        }
+    }
+
+    // Handle pattern vertex population (original implementation)
+    void populatePatternVertices(std::size_t length,
+                                const ImagePositions& patternPositions,
+                                const std::optional<PatternDependency>& patternDependencies) {
+        if (!patternDependencies || patternDependencies->mid.empty()) {
+            // Unlike other properties with expressions that evaluate to null,
             // the default value for `*-pattern` properties is an empty string
             // and will not have a valid entry in patternPositions. We still
             // need to populate the attribute buffers to avoid crashes when we
@@ -524,30 +642,6 @@ public:
         }
     }
 
-    void updateVertexVector(std::size_t, std::size_t, const GeometryTileFeature&, const FeatureState&) override {}
-
-    std::tuple<float, float> interpolationFactor(float) const override { return std::tuple<float, float>{0.0f, 0.0f}; }
-
-    std::tuple<std::array<uint16_t, 4>, std::array<uint16_t, 4>> uniformValue(
-        const PossiblyEvaluatedPropertyValue<Faded<T>>&) const override {
-        // Uniform values for vertex attribute arrays are unused.
-        return {};
-    }
-
-    std::size_t getVertexCount() const override { return patternToVertexVector.elements(); }
-
-    std::tuple<ZoomInterpolatedVertexType<A1>, ZoomInterpolatedVertexType<A2>> getVertexValue(
-        std::size_t index) const override {
-        const Vertex& patternValue = patternToVertexVector.at(index);
-        const Vertex2& zoomValue = crossfade.fromScale == 2 ? zoomInVertexVector.at(index)
-                                                            : zoomOutVertexVector.at(index);
-        return {ZoomInterpolatedVertexType<A1>{concatenate(patternValue.a1, patternValue.a1)},
-                ZoomInterpolatedVertexType<A2>{concatenate(zoomValue.a1, zoomValue.a1)}};
-    }
-
-    gfx::VertexVectorBasePtr getSharedVertexVector() const override { return sharedPatternToVertexVector; }
-
-private:
     style::PropertyExpression<T> expression;
     T defaultValue;
     Range<float> zoomRange;
@@ -664,6 +758,7 @@ public:
                                std::size_t length,
                                std::size_t index,
                                const ImagePositions& patternPositions,
+                               const DashPositions& dashPositions,
                                const std::optional<PatternDependency>& patternDependencies,
                                const CanonicalTileID& canonical,
                                const style::expression::Value& formattedSection = {}) {

@@ -27,10 +27,6 @@ layout (std140) uniform GlobalPaintParamsUBO {
 
 layout (std140) uniform LineSDFDrawableUBO {
     highp mat4 u_matrix;
-    highp vec2 u_patternscale_a;
-    highp vec2 u_patternscale_b;
-    highp float u_tex_y_a;
-    highp float u_tex_y_b;
     mediump float u_ratio;
     // Interpolations
     lowp float u_color_t;
@@ -40,8 +36,21 @@ layout (std140) uniform LineSDFDrawableUBO {
     lowp float u_offset_t;
     lowp float u_width_t;
     lowp float u_floorwidth_t;
+    lowp float u_dasharray_from_t;
+    lowp float u_dasharray_to_t;
     lowp float drawable_pad1;
     lowp float drawable_pad2;
+};
+
+layout (std140) uniform LineSDFTilePropsUBO {
+    highp float u_tileratio;
+    highp float u_crossfade_from;
+    highp float u_crossfade_to;
+    highp float u_lineatlas_width;
+    highp float u_lineatlas_height;
+    highp float u_mix;
+    highp float tileprops_pad1;
+    highp float tileprops_pad2;
 };
 
 layout (std140) uniform LineEvaluatedPropsUBO {
@@ -52,8 +61,9 @@ layout (std140) uniform LineEvaluatedPropsUBO {
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
+    highp vec4 u_dasharray_from;
+    highp vec4 u_dasharray_to;
     lowp float props_pad1;
-    lowp float props_pad2;
 };
 
 out vec2 v_normal;
@@ -69,6 +79,8 @@ out float v_gamma_scale;
 #pragma mapbox: define lowp float offset
 #pragma mapbox: define mediump float width
 #pragma mapbox: define lowp float floorwidth
+#pragma mapbox: define mediump vec4 dasharray_from
+#pragma mapbox: define mediump vec4 dasharray_to
 
 void main() {
     #pragma mapbox: initialize highp vec4 color
@@ -78,6 +90,8 @@ void main() {
     #pragma mapbox: initialize lowp float offset
     #pragma mapbox: initialize mediump float width
     #pragma mapbox: initialize lowp float floorwidth
+    #pragma mapbox: initialize mediump vec4 dasharray_from
+    #pragma mapbox: initialize mediump vec4 dasharray_to
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -107,7 +121,7 @@ void main() {
 
     // Scale the extrusion vector down to a normal and then up by the line width
     // of this vertex.
-    mediump vec2 dist =outset * a_extrude * scale;
+    mediump vec2 dist = outset * a_extrude * scale;
 
     // Calculate the offset when drawing a line that is to the side of the actual line.
     // We do this by creating a vector that points towards the extrude, but rotate
@@ -125,8 +139,20 @@ void main() {
     float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * u_units_to_pixels);
     v_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 
-    v_tex_a = vec2(a_linesofar * u_patternscale_a.x / floorwidth, normal.y * u_patternscale_a.y + u_tex_y_a);
-    v_tex_b = vec2(a_linesofar * u_patternscale_b.x / floorwidth, normal.y * u_patternscale_b.y + u_tex_y_b);
+    // REPLACE the old v_tex_a/v_tex_b calculation with dynamic dasharray calculation:
+    float u_patternscale_a_x = u_tileratio / dasharray_from.w / u_crossfade_from;
+    float u_patternscale_a_y = -dasharray_from.z / 2.0 / u_lineatlas_height;
+    float u_patternscale_b_x = u_tileratio / dasharray_to.w / u_crossfade_to;
+    float u_patternscale_b_y = -dasharray_to.z / 2.0 / u_lineatlas_height;
+    
+    v_tex_a = vec2(
+        a_linesofar * u_patternscale_a_x / floorwidth,
+        normal.y * u_patternscale_a_y + (dasharray_from.y + 0.5) / u_lineatlas_height
+    );
+    v_tex_b = vec2(
+        a_linesofar * u_patternscale_b_x / floorwidth,
+        normal.y * u_patternscale_b_y + (dasharray_to.y + 0.5) / u_lineatlas_height
+    );
 
     v_width2 = vec2(outset, inset);
 }

@@ -37,10 +37,6 @@ layout (std140) uniform GlobalPaintParamsUBO {
 
 layout (std140) uniform LineSDFDrawableUBO {
     highp mat4 u_matrix;
-    highp vec2 u_patternscale_a;
-    highp vec2 u_patternscale_b;
-    highp float u_tex_y_a;
-    highp float u_tex_y_b;
     mediump float u_ratio;
     // Interpolations
     lowp float u_color_t;
@@ -50,8 +46,21 @@ layout (std140) uniform LineSDFDrawableUBO {
     lowp float u_offset_t;
     lowp float u_width_t;
     lowp float u_floorwidth_t;
+    lowp float u_dasharray_from_t;
+    lowp float u_dasharray_to_t;
     lowp float drawable_pad1;
     lowp float drawable_pad2;
+};
+
+layout (std140) uniform LineSDFTilePropsUBO {
+    highp float u_tileratio;
+    highp float u_crossfade_from;
+    highp float u_crossfade_to;
+    highp float u_lineatlas_width;
+    highp float u_lineatlas_height;
+    highp float u_mix;
+    highp float tileprops_pad1;
+    highp float tileprops_pad2;
 };
 
 layout (std140) uniform LineEvaluatedPropsUBO {
@@ -62,8 +71,9 @@ layout (std140) uniform LineEvaluatedPropsUBO {
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
+    highp vec4 u_dasharray_from;
+    highp vec4 u_dasharray_to;
     lowp float props_pad1;
-    lowp float props_pad2;
 };
 
 out vec2 v_normal;
@@ -97,6 +107,14 @@ out mediump float width;
 #ifndef HAS_UNIFORM_u_floorwidth
 layout (location = 8) in lowp vec2 a_floorwidth;
 out lowp float floorwidth;
+#endif
+#ifndef HAS_UNIFORM_u_dasharray_from
+layout (location = 9) in mediump vec4 a_dasharray_from;
+out mediump vec4 dasharray_from;
+#endif
+#ifndef HAS_UNIFORM_u_dasharray_to
+layout (location = 10) in mediump vec4 a_dasharray_to;
+out mediump vec4 dasharray_to;
 #endif
 
 void main() {
@@ -135,6 +153,16 @@ floorwidth = unpack_mix_vec2(a_floorwidth, u_floorwidth_t);
 #else
 lowp float floorwidth = u_floorwidth;
 #endif
+    #ifndef HAS_UNIFORM_u_dasharray_from
+dasharray_from = a_dasharray_from;
+#else
+mediump vec4 dasharray_from = u_dasharray_from;
+#endif
+    #ifndef HAS_UNIFORM_u_dasharray_to
+dasharray_to = a_dasharray_to;
+#else
+mediump vec4 dasharray_to = u_dasharray_to;
+#endif
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -164,7 +192,7 @@ lowp float floorwidth = u_floorwidth;
 
     // Scale the extrusion vector down to a normal and then up by the line width
     // of this vertex.
-    mediump vec2 dist =outset * a_extrude * scale;
+    mediump vec2 dist = outset * a_extrude * scale;
 
     // Calculate the offset when drawing a line that is to the side of the actual line.
     // We do this by creating a vector that points towards the extrude, but rotate
@@ -182,14 +210,30 @@ lowp float floorwidth = u_floorwidth;
     float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * u_units_to_pixels);
     v_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 
-    v_tex_a = vec2(a_linesofar * u_patternscale_a.x / floorwidth, normal.y * u_patternscale_a.y + u_tex_y_a);
-    v_tex_b = vec2(a_linesofar * u_patternscale_b.x / floorwidth, normal.y * u_patternscale_b.y + u_tex_y_b);
+    // REPLACE the old v_tex_a/v_tex_b calculation with dynamic dasharray calculation:
+    float u_patternscale_a_x = u_tileratio / dasharray_from.w / u_crossfade_from;
+    float u_patternscale_a_y = -dasharray_from.z / 2.0 / u_lineatlas_height;
+    float u_patternscale_b_x = u_tileratio / dasharray_to.w / u_crossfade_to;
+    float u_patternscale_b_y = -dasharray_to.z / 2.0 / u_lineatlas_height;
+    
+    v_tex_a = vec2(
+        a_linesofar * u_patternscale_a_x / floorwidth,
+        normal.y * u_patternscale_a_y + (dasharray_from.y + 0.5) / u_lineatlas_height
+    );
+    v_tex_b = vec2(
+        a_linesofar * u_patternscale_b_x / floorwidth,
+        normal.y * u_patternscale_b_y + (dasharray_to.y + 0.5) / u_lineatlas_height
+    );
 
     v_width2 = vec2(outset, inset);
 }
 )";
     static constexpr const char* fragment = R"(layout (std140) uniform LineSDFTilePropsUBO {
-    highp float u_sdfgamma;
+    highp float u_tileratio;
+    highp float u_crossfade_from;
+    highp float u_crossfade_to;
+    highp float u_lineatlas_width;
+    highp float u_lineatlas_height;
     highp float u_mix;
     lowp float tileprops_pad1;
     lowp float tileprops_pad2;
@@ -203,8 +247,9 @@ layout (std140) uniform LineEvaluatedPropsUBO {
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
+    highp vec4 u_dasharray_from;
+    highp vec4 u_dasharray_to;
     lowp float props_pad1;
-    lowp float props_pad2;
 };
 
 uniform sampler2D u_image;
@@ -230,6 +275,12 @@ in mediump float width;
 #ifndef HAS_UNIFORM_u_floorwidth
 in lowp float floorwidth;
 #endif
+#ifndef HAS_UNIFORM_u_dasharray_from
+in mediump vec4 dasharray_from;
+#endif
+#ifndef HAS_UNIFORM_u_dasharray_to
+in mediump vec4 dasharray_to;
+#endif
 
 void main() {
     #ifdef HAS_UNIFORM_u_color
@@ -247,6 +298,12 @@ mediump float width = u_width;
     #ifdef HAS_UNIFORM_u_floorwidth
 lowp float floorwidth = u_floorwidth;
 #endif
+    #ifdef HAS_UNIFORM_u_dasharray_from
+mediump vec4 dasharray_from = u_dasharray_from;
+#endif
+    #ifdef HAS_UNIFORM_u_dasharray_to
+mediump vec4 dasharray_to = u_dasharray_to;
+#endif
 
     // Calculate the distance of the pixel from the line in pixels.
     float dist = length(v_normal) * v_width2.s;
@@ -260,7 +317,10 @@ lowp float floorwidth = u_floorwidth;
     float sdfdist_a = texture(u_image, v_tex_a).a;
     float sdfdist_b = texture(u_image, v_tex_b).a;
     float sdfdist = mix(sdfdist_a, sdfdist_b, u_mix);
-    alpha *= smoothstep(0.5 - u_sdfgamma / floorwidth, 0.5 + u_sdfgamma / floorwidth, sdfdist);
+    
+    // Calculate SDF gamma - includes DEVICE_PIXEL_RATIO for proper antialiasing
+    float sdfgamma = (u_lineatlas_width / 256.0 / DEVICE_PIXEL_RATIO) / min(dasharray_from.w, dasharray_to.w);
+    alpha *= smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     fragColor = color * (alpha * opacity);
 
