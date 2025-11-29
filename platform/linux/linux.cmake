@@ -182,7 +182,7 @@ target_link_libraries(
 )
 
 # Bundle system provided libraries
-if((NOT MLN_USE_BUILTIN_ICU OR MLN_WITH_NODE) AND NOT "${ARMERGE}" STREQUAL "ARMERGE-NOTFOUND")
+if(NOT MLN_USE_BUILTIN_ICU AND NOT "${ARMERGE}" STREQUAL "ARMERGE-NOTFOUND")
     message(STATUS "Found armerge: ${ARMERGE}")
     include(${PROJECT_SOURCE_DIR}/cmake/find_static_library.cmake)
     set(STATIC_LIBS "")
