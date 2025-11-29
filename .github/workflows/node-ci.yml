@@ -137,9 +137,7 @@ jobs:
             libuv1-dev \
             libjpeg-dev \
             libpng-dev \
-            libwebp-dev \
-            libicu-dev \
-            zlib1g-dev
+            libwebp-dev
           /usr/sbin/update-ccache-symlinks
 
       - name: Use Node.js from nvmrc

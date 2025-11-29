@@ -187,7 +187,6 @@
       "description": "Linux Node build (OpenGL renderer)",
       "cacheVariables": {
         "MLN_WITH_NODE": "ON",
-        "MLN_STATIC_NODE_DEPS": "ON",
         "MLN_WITH_OPENGL": "ON",
         "MLN_WITH_WAYLAND": "OFF",
         "MLN_WITH_X11": "ON",
