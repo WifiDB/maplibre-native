@@ -61,3 +61,5 @@ out.png
 **/*.rs.bk
 **/*.profraw
 
+/platform/linux/vendor/*/src/
+/platform/linux/vendor/*/*.tar.gz
