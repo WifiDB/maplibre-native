@@ -8,9 +8,9 @@ if(MLN_STATIC_NODE_DEPS)
     
     # Build vendored libraries
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/vendor/zlib)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/vendor/png)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/vendor/jpeg)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/vendor/webp)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/vendor/libpng)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/vendor/libjpeg-turbo)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/vendor/libwebp)
     
     # Set up aliases
     set(PNG_STATIC_TARGET png_static)
