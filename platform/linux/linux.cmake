@@ -1,5 +1,6 @@
 option(MLN_WITH_X11 "Build with X11 Support" ON)
 option(MLN_WITH_WAYLAND "Build with Wayland Support" OFF)
+option(MLN_STATIC_NODE_DEPS "Statically link dependencies for Node builds" OFF)
 
 find_package(CURL REQUIRED)
 find_package(JPEG REQUIRED)
@@ -15,6 +16,33 @@ pkg_search_module(LIBUV libuv REQUIRED)
 pkg_search_module(ICUUC icu-uc)
 pkg_search_module(ICUI18N icu-i18n)
 find_program(ARMERGE NAMES armerge)
+
+# For Node builds with static dependencies, find static versions of libraries to bundle
+if(MLN_STATIC_NODE_DEPS)
+    message(STATUS "Static Node deps: Configuring static library dependencies")
+    set(_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+    
+    find_library(PNG_STATIC_LIBRARY NAMES png16 png libpng16 libpng REQUIRED)
+    find_library(ZLIB_STATIC_LIBRARY NAMES z zlib libz REQUIRED)
+    find_library(JPEG_STATIC_LIBRARY NAMES jpeg libjpeg REQUIRED)
+    find_library(WEBP_STATIC_LIBRARY NAMES webp libwebp REQUIRED)
+    find_library(ICUUC_STATIC_LIBRARY NAMES icuuc libicuuc)
+    find_library(ICUI18N_STATIC_LIBRARY NAMES icui18n libicui18n)
+    find_library(ICUDATA_STATIC_LIBRARY NAMES icudata libicudata)
+    
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ${_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
+    
+    message(STATUS "Static Node deps: PNG=${PNG_STATIC_LIBRARY}")
+    message(STATUS "Static Node deps: ZLIB=${ZLIB_STATIC_LIBRARY}")
+    message(STATUS "Static Node deps: JPEG=${JPEG_STATIC_LIBRARY}")
+    message(STATUS "Static Node deps: WEBP=${WEBP_STATIC_LIBRARY}")
+    if(ICUUC_STATIC_LIBRARY)
+        message(STATUS "Static Node deps: ICU UC=${ICUUC_STATIC_LIBRARY}")
+        message(STATUS "Static Node deps: ICU I18N=${ICUI18N_STATIC_LIBRARY}")
+        message(STATUS "Static Node deps: ICU DATA=${ICUDATA_STATIC_LIBRARY}")
+    endif()
+endif()
 
 if(MLN_WITH_WAYLAND AND NOT MLN_WITH_VULKAN)
     # See https://github.com/maplibre/maplibre-native/pull/2022
@@ -168,21 +196,25 @@ target_link_libraries(
     mbgl-core
     PRIVATE
         ${CURL_LIBRARIES}
-        ${JPEG_LIBRARIES}
+        $<IF:$<BOOL:${MLN_STATIC_NODE_DEPS}>,${JPEG_STATIC_LIBRARY},${JPEG_LIBRARIES}>
         ${LIBUV_LIBRARIES}
         ${X11_LIBRARIES}
         ${CMAKE_THREAD_LIBS_INIT}
-        ${WEBP_LIBRARIES}
-        $<$<NOT:$<BOOL:${MLN_USE_BUILTIN_ICU}>>:${ICUUC_LIBRARIES}>
-        $<$<NOT:$<BOOL:${MLN_USE_BUILTIN_ICU}>>:${ICUI18N_LIBRARIES}>
+        $<IF:$<BOOL:${MLN_STATIC_NODE_DEPS}>,${WEBP_STATIC_LIBRARY},${WEBP_LIBRARIES}>
+        $<IF:$<AND:$<NOT:$<BOOL:${MLN_USE_BUILTIN_ICU}>>,$<NOT:$<BOOL:${MLN_STATIC_NODE_DEPS}>>>,${ICUUC_LIBRARIES},>
+        $<IF:$<AND:$<NOT:$<BOOL:${MLN_USE_BUILTIN_ICU}>>,$<NOT:$<BOOL:${MLN_STATIC_NODE_DEPS}>>>,${ICUI18N_LIBRARIES},>
+        $<IF:$<AND:$<NOT:$<BOOL:${MLN_USE_BUILTIN_ICU}>>,$<BOOL:${MLN_STATIC_NODE_DEPS}>,$<BOOL:${ICUUC_STATIC_LIBRARY}>>,${ICUUC_STATIC_LIBRARY},>
+        $<IF:$<AND:$<NOT:$<BOOL:${MLN_USE_BUILTIN_ICU}>>,$<BOOL:${MLN_STATIC_NODE_DEPS}>,$<BOOL:${ICUI18N_STATIC_LIBRARY}>>,${ICUI18N_STATIC_LIBRARY},>
+        $<IF:$<AND:$<NOT:$<BOOL:${MLN_USE_BUILTIN_ICU}>>,$<BOOL:${MLN_STATIC_NODE_DEPS}>,$<BOOL:${ICUDATA_STATIC_LIBRARY}>>,${ICUDATA_STATIC_LIBRARY},>
         $<$<BOOL:${MLN_USE_BUILTIN_ICU}>:mbgl-vendor-icu>
-        PNG::PNG
+        $<IF:$<BOOL:${MLN_STATIC_NODE_DEPS}>,${PNG_STATIC_LIBRARY},PNG::PNG>
+        $<$<BOOL:${MLN_STATIC_NODE_DEPS}>:${ZLIB_STATIC_LIBRARY}>
         mbgl-vendor-nunicode
         mbgl-vendor-sqlite
 )
 
 # Bundle system provided libraries
-if((NOT MLN_USE_BUILTIN_ICU OR MLN_WITH_NODE) AND NOT "${ARMERGE}" STREQUAL "ARMERGE-NOTFOUND")
+if(NOT MLN_USE_BUILTIN_ICU AND NOT "${ARMERGE}" STREQUAL "ARMERGE-NOTFOUND")
     message(STATUS "Found armerge: ${ARMERGE}")
     include(${PROJECT_SOURCE_DIR}/cmake/find_static_library.cmake)
     set(STATIC_LIBS "")
