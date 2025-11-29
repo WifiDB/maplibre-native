@@ -2,23 +2,23 @@ option(MLN_WITH_X11 "Build with X11 Support" ON)
 option(MLN_WITH_WAYLAND "Build with Wayland Support" OFF)
 option(MLN_STATIC_NODE_DEPS "Statically link dependencies for Node builds" OFF)
 
-# For Node builds with static dependencies, find static versions first
+# For Node builds, use vendored static libraries with -fPIC
 if(MLN_STATIC_NODE_DEPS)
-    message(STATUS "Static Node deps: Configuring static library dependencies")
-    set(_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
-    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+    message(STATUS "Using vendored static libraries for Node build")
     
-    find_library(PNG_STATIC_LIBRARY NAMES png16 png libpng16 libpng REQUIRED)
-    find_library(ZLIB_STATIC_LIBRARY NAMES z zlib libz REQUIRED)
-    find_library(JPEG_STATIC_LIBRARY NAMES jpeg libjpeg REQUIRED)
-    find_library(WEBP_STATIC_LIBRARY NAMES webp libwebp REQUIRED)
+    # Build vendored libraries
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/vendor/zlib)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/vendor/png)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/vendor/jpeg)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/vendor/webp)
     
-    set(CMAKE_FIND_LIBRARY_SUFFIXES ${_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
+    # Set up aliases
+    set(PNG_STATIC_TARGET png_static)
+    set(ZLIB_STATIC_TARGET zlibstatic)
+    set(JPEG_STATIC_TARGET jpeg)
+    set(WEBP_STATIC_TARGET webp)
     
-    message(STATUS "Static Node deps: PNG=${PNG_STATIC_LIBRARY}")
-    message(STATUS "Static Node deps: ZLIB=${ZLIB_STATIC_LIBRARY}")
-    message(STATUS "Static Node deps: JPEG=${JPEG_STATIC_LIBRARY}")
-    message(STATUS "Static Node deps: WEBP=${WEBP_STATIC_LIBRARY}")
+    message(STATUS "Vendored static libraries configured")
 endif()
 
 find_package(CURL REQUIRED)
@@ -188,16 +188,16 @@ target_link_libraries(
     mbgl-core
     PRIVATE
         ${CURL_LIBRARIES}
-        $<IF:$<BOOL:${MLN_STATIC_NODE_DEPS}>,${JPEG_STATIC_LIBRARY},${JPEG_LIBRARIES}>
+        $<IF:$<BOOL:${MLN_STATIC_NODE_DEPS}>,${JPEG_STATIC_TARGET},${JPEG_LIBRARIES}>
         ${LIBUV_LIBRARIES}
         ${X11_LIBRARIES}
         ${CMAKE_THREAD_LIBS_INIT}
-        $<IF:$<BOOL:${MLN_STATIC_NODE_DEPS}>,${WEBP_STATIC_LIBRARY},${WEBP_LIBRARIES}>
+        $<IF:$<BOOL:${MLN_STATIC_NODE_DEPS}>,${WEBP_STATIC_TARGET},${WEBP_LIBRARIES}>
         $<$<NOT:$<BOOL:${MLN_USE_BUILTIN_ICU}>>:${ICUUC_LIBRARIES}>
         $<$<NOT:$<BOOL:${MLN_USE_BUILTIN_ICU}>>:${ICUI18N_LIBRARIES}>
         $<$<BOOL:${MLN_USE_BUILTIN_ICU}>:mbgl-vendor-icu>
-        $<IF:$<BOOL:${MLN_STATIC_NODE_DEPS}>,${PNG_STATIC_LIBRARY},PNG::PNG>
-        $<$<BOOL:${MLN_STATIC_NODE_DEPS}>:${ZLIB_STATIC_LIBRARY}>
+        $<IF:$<BOOL:${MLN_STATIC_NODE_DEPS}>,${PNG_STATIC_TARGET},PNG::PNG>
+        $<$<BOOL:${MLN_STATIC_NODE_DEPS}>:${ZLIB_STATIC_TARGET}>
         mbgl-vendor-nunicode
         mbgl-vendor-sqlite
 )
