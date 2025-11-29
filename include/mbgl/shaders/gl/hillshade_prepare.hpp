@@ -92,7 +92,7 @@ void main() {
     vec2 deriv = vec2(
         (c + f + f + i) - (a + d + d + g),
         (g + h + h + i) - (a + b + b + c)
-    ) * tileSize / pow(2.0, (u_zoom - u_maxzoom) * exaggeration + 28.2562 - u_zoom);
+    ) * tileSize / pow(2.0, exaggeration + 28.2562 - u_zoom);
     
     // Encode the derivative into the color channels (r and g)
     // The derivative is scaled from world-space slope to the range [0, 1] for texture storage.
