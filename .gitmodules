@@ -122,3 +122,6 @@
 [submodule "platform/linux/vendor/libwebp"]
 	path = platform/linux/vendor/libwebp
 	url = https://chromium.googlesource.com/webm/libwebp
+[submodule "platform/linux/vendor/zlib"]
+	path = platform/linux/vendor/zlib
+	url = https://github.com/madler/zlib.git
