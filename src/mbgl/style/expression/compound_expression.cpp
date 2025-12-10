@@ -377,7 +377,7 @@ const auto& elevationCompoundExpression() {
             if (params.colorRampParameter) {
                 return *(params.colorRampParameter);
             }
-            // For 3D terrain, elevation is passed directly  
+            // For 3D terrain, elevation is passed directly
             if (params.elevation) {
                 return static_cast<double>(*(params.elevation));
             }
