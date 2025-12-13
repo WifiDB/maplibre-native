@@ -1,6 +1,6 @@
 ## main
 
-## 6.3.0-pre.11
+## 6.3.0-pre.12
 * Updated supported node versions to v20, v22, and v24. Support for node v18 has been removed. ([#3760](https://github.com/maplibre/maplibre-native/pull/3760))
 * Updated NAN to v2.23.0 to support node v24 ([#3760](https://github.com/maplibre/maplibre-native/pull/3760))
 * Updated the linux binary to be built on Ubuntu 24.04 ([#3760](https://github.com/maplibre/maplibre-native/pull/3760))
