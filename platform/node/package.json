@@ -17,7 +17,7 @@
   "types": "index.d.ts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/wifidb/maplibre-native"
+    "url": "git+https://github.com/WifiDB/maplibre-native.git"
   },
   "license": "BSD-2-Clause",
   "dependencies": {
@@ -68,7 +68,7 @@
   "binary": {
     "module_name": "mbgl",
     "module_path": "./lib/{node_abi}",
-    "host": "https://github.com/wifidb/maplibre-native/releases/download/",
+    "host": "https://github.com/WifiDB/maplibre-native/releases/download/",
     "remote_path": "node-v{version}",
     "package_name": "{node_abi}-{platform}-{arch}-{configuration}.tar.gz"
   }
