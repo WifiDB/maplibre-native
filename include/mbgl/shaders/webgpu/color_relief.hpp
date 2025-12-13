@@ -43,7 +43,7 @@ struct ColorReliefTilePropsUBO {
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<ColorReliefDrawableUBO>;
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
+@group(0) @binding(4) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -91,8 +91,8 @@ struct ColorReliefEvaluatedPropsUBO {
 };
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
-@group(0) @binding(4) var<uniform> props: ColorReliefEvaluatedPropsUBO;
+@group(0) @binding(4) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
+@group(0) @binding(5) var<uniform> props: ColorReliefEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var dem_texture: texture_2d<f32>;
 @group(1) @binding(2) var elevation_stops_texture: texture_2d<f32>;
@@ -105,13 +105,13 @@ fn getElevation(coord: vec2<f32>, unpack: vec4<f32>) -> f32 {
 }
 
 fn getElevationStop(stop: i32, color_ramp_size: i32) -> f32 {
-    let x = (f32(stop) + 0.5) / f32(color_ramp_size);
-    return textureSample(elevation_stops_texture, texture_sampler, vec2<f32>(x, 0.0)).r;
+    // Use textureLoad for RGBA32Float texture (not filterable in WebGPU)
+    return textureLoad(elevation_stops_texture, vec2<i32>(stop, 0), 0).r;
 }
 
 fn getColorStop(stop: i32, color_ramp_size: i32) -> vec4<f32> {
     let x = (f32(stop) + 0.5) / f32(color_ramp_size);
-    return textureSample(color_stops_texture, texture_sampler, vec2<f32>(x, 0.0));
+    return textureSample(color_stops_texture, texture_sampler, vec2<f32>(x, 0.5));
 }
 
 @fragment
