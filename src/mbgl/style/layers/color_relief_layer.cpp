@@ -13,10 +13,6 @@
 #include <mbgl/style/conversion_impl.hpp>
 #include <mbgl/util/traits.hpp>
 #include <mbgl/util/logging.hpp>
-#include <iostream>
-
-// Synchronous debug output that bypasses async logging
-#define DEBUG_PRINT(msg) do { std::cerr << "[ColorRelief STYLE DEBUG] " << msg << std::endl; std::cerr.flush(); } while(0)
 
 #include <mapbox/eternal.hpp>
 
@@ -38,16 +34,13 @@ const LayerTypeInfo* ColorReliefLayer::Impl::staticTypeInfo() noexcept {
 
 ColorReliefLayer::ColorReliefLayer(const std::string& layerID, const std::string& sourceID)
     : Layer(makeMutable<Impl>(layerID, sourceID)) {
-    DEBUG_PRINT("ColorReliefLayer constructor called, id=" << layerID << ", source=" << sourceID);
 }
 
 ColorReliefLayer::ColorReliefLayer(Immutable<Impl> impl_)
     : Layer(std::move(impl_)) {
-    DEBUG_PRINT("ColorReliefLayer constructor (from impl) called");
 }
 
 ColorReliefLayer::~ColorReliefLayer() {
-    DEBUG_PRINT("ColorReliefLayer destructor called");
     weakFactory.invalidateWeakPtrs();
 }
 
@@ -75,17 +68,17 @@ void ColorReliefLayer::Impl::stringifyLayout(rapidjson::Writer<rapidjson::String
 // Paint properties
 
 ColorRampPropertyValue ColorReliefLayer::getDefaultColorReliefColor() {
-    DEBUG_PRINT("getDefaultColorReliefColor called");
+    mbgl::Log::Info(mbgl::Event::Style, "ColorRelief: getDefaultColorReliefColor called");
     conversion::Error error;
     // Default hypsometric color ramp from sea level to ~8850m (Everest)
     std::string rawValue = R"JSON(["interpolate",["linear"],["elevation"],0,"#0a5c0a",500,"#1e8b1e",1000,"#7cb97c",2000,"#c9a847",3000,"#b87333",4000,"#8b6c5c",5000,"#a0a0a0",8000,"#ffffff"])JSON";
     auto result = conversion::convertJSON<ColorRampPropertyValue>(rawValue, error);
     if (result) {
-        DEBUG_PRINT("default color ramp parsed successfully");
+        mbgl::Log::Info(mbgl::Event::Style, "ColorRelief: default color ramp parsed successfully");
         return *result;
     }
     // Fallback to undefined if parsing fails (should not happen with hardcoded JSON)
-    DEBUG_PRINT("failed to parse default color ramp: " << error.message);
+    mbgl::Log::Error(mbgl::Event::Style, "ColorRelief: failed to parse default color ramp: " + error.message);
     return ColorRampPropertyValue{};
 }
 
@@ -199,21 +192,17 @@ Value ColorReliefLayer::serialize() const {
 }
 
 std::optional<Error> ColorReliefLayer::setPropertyInternal(const std::string& name, const Convertible& value) {
-    DEBUG_PRINT("setPropertyInternal called, name=" << name);
     const auto it = layerProperties.find(name.c_str());
     if (it == layerProperties.end()) return Error{"layer doesn't support this property"};
 
     auto property = static_cast<Property>(it->second);
 
     if (property == Property::ColorReliefColor) {
-        DEBUG_PRINT("parsing ColorReliefColor property");
         Error error;
         const auto& typedValue = convert<ColorRampPropertyValue>(value, error, false, false);
         if (!typedValue) {
-            DEBUG_PRINT("failed to parse ColorReliefColor: " << error.message);
             return error;
         }
-        DEBUG_PRINT("ColorReliefColor parsed successfully");
 
         setColorReliefColor(*typedValue);
         return std::nullopt;
