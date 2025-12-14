@@ -12,7 +12,6 @@
 #include <mbgl/style/conversion/json.hpp>
 #include <mbgl/style/conversion_impl.hpp>
 #include <mbgl/util/traits.hpp>
-#include <mbgl/util/logging.hpp>
 
 #include <mapbox/eternal.hpp>
 
@@ -68,17 +67,14 @@ void ColorReliefLayer::Impl::stringifyLayout(rapidjson::Writer<rapidjson::String
 // Paint properties
 
 ColorRampPropertyValue ColorReliefLayer::getDefaultColorReliefColor() {
-    mbgl::Log::Info(mbgl::Event::Style, "ColorRelief: getDefaultColorReliefColor called");
     conversion::Error error;
     // Default hypsometric color ramp from sea level to ~8850m (Everest)
     std::string rawValue = R"JSON(["interpolate",["linear"],["elevation"],0,"#0a5c0a",500,"#1e8b1e",1000,"#7cb97c",2000,"#c9a847",3000,"#b87333",4000,"#8b6c5c",5000,"#a0a0a0",8000,"#ffffff"])JSON";
     auto result = conversion::convertJSON<ColorRampPropertyValue>(rawValue, error);
     if (result) {
-        mbgl::Log::Info(mbgl::Event::Style, "ColorRelief: default color ramp parsed successfully");
         return *result;
     }
     // Fallback to undefined if parsing fails (should not happen with hardcoded JSON)
-    mbgl::Log::Error(mbgl::Event::Style, "ColorRelief: failed to parse default color ramp: " + error.message);
     return ColorRampPropertyValue{};
 }
 

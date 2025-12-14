@@ -21,7 +21,6 @@
 #include <mbgl/style/expression/interpolate.hpp>
 #include <mbgl/style/conversion/color_ramp_property_value.hpp>
 #include <mbgl/util/premultiply.hpp>
-#include <mbgl/util/logging.hpp>
 #include <vector>
 #include <cstring>
 
@@ -42,7 +41,6 @@ inline const ColorReliefLayer::Impl& impl_cast(const Immutable<Layer::Impl>& imp
 RenderColorReliefLayer::RenderColorReliefLayer(Immutable<ColorReliefLayer::Impl> _impl)
     : RenderLayer(makeMutable<ColorReliefLayerProperties>(std::move(_impl))),
       unevaluated(impl_cast(baseImpl).paint.untransitioned()) {
-    mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: constructor started");
     styleDependencies = unevaluated.getDependencies();
 
     // Initialize color ramp data with RGBA format (4 floats per stop)
@@ -50,10 +48,8 @@ RenderColorReliefLayer::RenderColorReliefLayer(Immutable<ColorReliefLayer::Impl>
     elevationStopsData = std::make_shared<std::vector<float>>(colorRampSize * 4);
     colorStops = std::make_shared<PremultipliedImage>(Size{colorRampSize, 1});
 
-    mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: calling updateColorRamp from constructor");
     // Initialize with default color ramp immediately to avoid uninitialized state
     updateColorRamp();
-    mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: constructor completed");
 }
 
 RenderColorReliefLayer::~RenderColorReliefLayer() = default;
@@ -93,21 +89,17 @@ void RenderColorReliefLayer::prepare(const LayerPrepareParameters& params) {
 }
 
 void RenderColorReliefLayer::updateColorRamp() {
-    mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: updateColorRamp started");
     // Ensure data structures are initialized
     if (!elevationStopsData || !colorStops) {
-        mbgl::Log::Warning(mbgl::Event::Render, "ColorRelief: updateColorRamp - data structures not initialized");
         return;
     }
 
     // Get the color property value, using default if undefined
     auto colorValue = unevaluated.get<ColorReliefColor>().getValue();
     if (colorValue.isUndefined()) {
-        mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: color value undefined, using default");
         colorValue = style::ColorReliefLayer::getDefaultColorReliefColor();
         if (colorValue.isUndefined()) {
             // If even the default is undefined, we can't proceed
-            mbgl::Log::Error(mbgl::Event::Render, "ColorRelief: default color value is also undefined!");
             return;
         }
     }
@@ -119,11 +111,9 @@ void RenderColorReliefLayer::updateColorRamp() {
     // Note: getExpression() dereferences the internal pointer, so we must ensure isUndefined() is false first
     const mbgl::style::expression::Expression* exprPtr = &colorValue.getExpression();
     if (!exprPtr) {
-        mbgl::Log::Error(mbgl::Event::Render, "ColorRelief: expression pointer is null");
         return;
     }
     const mbgl::style::expression::Expression& expr = *exprPtr;
-    mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: got expression, kind=" + std::to_string(static_cast<int>(expr.getKind())));
 
     if (expr.getKind() == mbgl::style::expression::Kind::Interpolate) {
         const auto* interpolate = static_cast<const mbgl::style::expression::Interpolate*>(&expr);
@@ -175,11 +165,8 @@ void RenderColorReliefLayer::updateColorRamp() {
 
     const uint32_t rampSize = static_cast<uint32_t>(elevationStopsVector.size());
     if (rampSize == 0) {
-        mbgl::Log::Warning(mbgl::Event::Render, "ColorRelief: rampSize is 0, returning");
         return;
     }
-
-    mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: processing " + std::to_string(rampSize) + " color stops");
 
     // Resize and prepare structures
     elevationStopsData->resize(rampSize * 4); // RGBA float for compatibility
@@ -212,20 +199,16 @@ void RenderColorReliefLayer::update(gfx::ShaderRegistry& shaders,
                                     const std::shared_ptr<UpdateParameters>&,
                                     const RenderTree&,
                                     UniqueChangeRequestVec& changes) {
-    mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: update() started");
     if (!renderTiles || renderTiles->empty()) {
-        mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: no renderTiles, removing drawables");
         removeAllDrawables();
         return;
     }
 
     // Set up layer group
     if (!layerGroup) {
-        mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: creating layer group");
         if (auto layerGroup_ = context.createTileLayerGroup(layerIndex, /*initialCapacity=*/64, getID())) {
             setLayerGroup(std::move(layerGroup_), changes);
         } else {
-            mbgl::Log::Error(mbgl::Event::Render, "ColorRelief: failed to create layer group");
             return;
         }
     }
@@ -265,16 +248,12 @@ void RenderColorReliefLayer::update(gfx::ShaderRegistry& shaders,
 
     // Update color ramp textures if changed
     if (colorRampChanged && elevationStopsData && colorStops) {
-        mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: creating/updating color ramp textures");
         if (!elevationStopsTexture) {
             elevationStopsTexture = context.createTexture2D();
-            mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: created elevation stops texture");
         }
 
         // Use RGBA32F instead of R32F for llvmpipe compatibility
         elevationStopsTexture->setFormat(gfx::TexturePixelType::RGBA, gfx::TextureChannelDataType::Float);
-        mbgl::Log::Info(mbgl::Event::Render,
-                        "ColorRelief: uploading elevation data, size=" + std::to_string(colorRampSize));
         elevationStopsTexture->upload(elevationStopsData->data(), Size{colorRampSize, 1});
         elevationStopsTexture->setSamplerConfiguration({.filter = gfx::TextureFilterType::Nearest,
                                                         .wrapU = gfx::TextureWrapType::Clamp,
@@ -282,7 +261,6 @@ void RenderColorReliefLayer::update(gfx::ShaderRegistry& shaders,
 
         if (!colorStopsTexture) {
             colorStopsTexture = context.createTexture2D();
-            mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: created color stops texture");
         }
 
         colorStopsTexture->setImage(colorStops);
@@ -291,17 +269,13 @@ void RenderColorReliefLayer::update(gfx::ShaderRegistry& shaders,
                                                     .wrapV = gfx::TextureWrapType::Clamp});
 
         colorRampChanged = false;
-        mbgl::Log::Info(mbgl::Event::Render, "ColorRelief: color ramp textures updated successfully");
     }
 
     // Skip rendering if color ramp textures aren't ready
     if (!elevationStopsTexture || !colorStopsTexture) {
-        mbgl::Log::Warning(mbgl::Event::Render, "ColorRelief: textures not ready, skipping render");
         return;
     }
 
-    mbgl::Log::Info(mbgl::Event::Render,
-                    "ColorRelief: processing " + std::to_string(renderTiles->size()) + " tiles");
     std::unique_ptr<gfx::DrawableBuilder> builder;
 
     for (const RenderTile& tile : *renderTiles) {
