@@ -16,10 +16,6 @@
 #include <mbgl/util/logging.hpp>
 #include <mbgl/util/instrumentation.hpp>
 #include <mbgl/util/thread_pool.hpp>
-#include <iostream>
-
-// Synchronous debug output for shader loading
-#define GL_DEBUG_PRINT(msg) do { std::cerr << "[GL Context DEBUG] " << msg << std::endl; std::cerr.flush(); } while(0)
 
 #include <mbgl/gl/drawable_gl.hpp>
 #include <mbgl/gl/drawable_gl_builder.hpp>
@@ -559,24 +555,11 @@ gfx::UniqueUniformBufferArray Context::createLayerUniformBufferArray() {
 gfx::ShaderProgramBasePtr Context::getGenericShader(gfx::ShaderRegistry& shaders, const std::string& name) {
     MLN_TRACE_FUNC();
 
-    GL_DEBUG_PRINT("getGenericShader called for: " << name);
     auto shaderGroup = shaders.getShaderGroup(name);
     if (!shaderGroup) {
-        GL_DEBUG_PRINT("shaderGroup is null for: " << name);
         return nullptr;
     }
-    GL_DEBUG_PRINT("shaderGroup found, calling getOrCreateShader");
-    try {
-        auto result = std::static_pointer_cast<gfx::ShaderProgramBase>(shaderGroup->getOrCreateShader(*this, {}));
-        GL_DEBUG_PRINT("getOrCreateShader returned successfully");
-        return result;
-    } catch (const std::exception& e) {
-        GL_DEBUG_PRINT("EXCEPTION in getOrCreateShader: " << e.what());
-        throw;
-    } catch (...) {
-        GL_DEBUG_PRINT("UNKNOWN EXCEPTION in getOrCreateShader");
-        throw;
-    }
+    return std::static_pointer_cast<gfx::ShaderProgramBase>(shaderGroup->getOrCreateShader(*this, {}));
 }
 
 TileLayerGroupPtr Context::createTileLayerGroup(int32_t layerIndex, std::size_t initialCapacity, std::string name) {

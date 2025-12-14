@@ -262,23 +262,11 @@ void RenderColorReliefLayer::update(gfx::ShaderRegistry& shaders,
 
     DEBUG_PRINT("getting shader");
     if (!colorReliefShader) {
-        try {
-            DEBUG_PRINT("calling context.getGenericShader for ColorReliefShader");
-            colorReliefShader = context.getGenericShader(shaders, ColorReliefShaderGroupName);
-            DEBUG_PRINT("getGenericShader returned");
-        } catch (const std::exception& e) {
-            DEBUG_PRINT("EXCEPTION during shader load: " << e.what());
-            removeAllDrawables();
-            return;
-        } catch (...) {
-            DEBUG_PRINT("UNKNOWN EXCEPTION during shader load");
-            removeAllDrawables();
-            return;
-        }
+        colorReliefShader = context.getGenericShader(shaders, ColorReliefShaderGroupName);
     }
 
     if (!colorReliefShader) {
-        DEBUG_PRINT("shader failed to load (returned null)");
+        DEBUG_PRINT("shader failed to load");
         removeAllDrawables();
         return;
     }

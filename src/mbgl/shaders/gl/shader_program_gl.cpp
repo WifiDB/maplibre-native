@@ -9,10 +9,6 @@
 
 #include <cstring>
 #include <utility>
-#include <iostream>
-
-// Synchronous debug output for shader compilation
-#define SHADER_DEBUG_PRINT(msg) do { std::cerr << "[ShaderProgram DEBUG] " << msg << std::endl; std::cerr.flush(); } while(0)
 
 namespace mbgl {
 namespace gl {
@@ -119,14 +115,11 @@ std::shared_ptr<ShaderProgramGL> ShaderProgramGL::create(
     const std::string& vertexSource,
     const std::string& fragmentSource,
     const std::string& additionalDefines) noexcept(false) {
-    SHADER_DEBUG_PRINT("ShaderProgramGL::create called");
     try {
-        SHADER_DEBUG_PRINT("onPreCompileShader");
         context.getObserver().onPreCompileShader(
             programParameters.getProgramType(), gfx::Backend::Type::OpenGL, additionalDefines);
 
         // throws on compile error
-        SHADER_DEBUG_PRINT("compiling vertex shader");
         auto vertProg = context.createShader(
             ShaderType::Vertex,
             std::initializer_list<const char*>{
@@ -135,7 +128,6 @@ std::shared_ptr<ShaderProgramGL> ShaderProgramGL::create(
                 additionalDefines.c_str(),
                 shaders::ShaderSource<shaders::BuiltIn::Prelude, gfx::Backend::Type::OpenGL>::vertex,
                 vertexSource.c_str()});
-        SHADER_DEBUG_PRINT("vertex shader compiled, compiling fragment shader");
         auto fragProg = context.createShader(
             ShaderType::Fragment,
             {"#version 300 es\n",
@@ -143,14 +135,11 @@ std::shared_ptr<ShaderProgramGL> ShaderProgramGL::create(
              additionalDefines.c_str(),
              shaders::ShaderSource<shaders::BuiltIn::Prelude, gfx::Backend::Type::OpenGL>::fragment,
              fragmentSource.c_str()});
-        SHADER_DEBUG_PRINT("fragment shader compiled, linking program");
         auto program = context.createProgram(vertProg, fragProg, firstAttribName.data());
-        SHADER_DEBUG_PRINT("program linked");
 
         context.getObserver().onPostCompileShader(
             programParameters.getProgramType(), gfx::Backend::Type::OpenGL, additionalDefines);
 
-        SHADER_DEBUG_PRINT("setting up uniform blocks");
         for (const auto& blockInfo : uniformBlocksInfo) {
             GLint index = MBGL_CHECK_ERROR(glGetUniformBlockIndex(program, blockInfo.name.data()));
             GLint size = 0;
@@ -159,9 +148,7 @@ std::shared_ptr<ShaderProgramGL> ShaderProgramGL::create(
             GLint binding = static_cast<GLint>(blockInfo.binding);
             MBGL_CHECK_ERROR(glUniformBlockBinding(program, index, binding));
         }
-        SHADER_DEBUG_PRINT("uniform blocks set up");
 
-        SHADER_DEBUG_PRINT("setting up sampler locations");
         SamplerLocationArray samplerLocations;
         for (const auto& textureInfo : texturesInfo) {
             GLint location = MBGL_CHECK_ERROR(glGetUniformLocation(program, textureInfo.name.data()));
@@ -170,9 +157,7 @@ std::shared_ptr<ShaderProgramGL> ShaderProgramGL::create(
                 samplerLocations[textureInfo.id] = location;
             }
         }
-        SHADER_DEBUG_PRINT("sampler locations set up");
 
-        SHADER_DEBUG_PRINT("setting up vertex attributes");
         VertexAttributeArrayGL attrs;
         GLint count = 0;
         GLint maxLength = 0;
@@ -191,11 +176,9 @@ std::shared_ptr<ShaderProgramGL> ShaderProgramGL::create(
             assert(attributesInfo[location].name == std::string_view(name.data()));
             addAttr(attrs, attributesInfo[location].id, location, length, size, glType);
         }
-        SHADER_DEBUG_PRINT("vertex attributes set up, returning shader");
 
         return std::make_shared<ShaderProgramGL>(std::move(program), std::move(attrs), std::move(samplerLocations));
     } catch (const std::exception& e) {
-        SHADER_DEBUG_PRINT("EXCEPTION during shader creation: " << e.what());
         context.getObserver().onShaderCompileFailed(
             programParameters.getProgramType(), gfx::Backend::Type::OpenGL, additionalDefines);
         std::rethrow_exception(std::current_exception());
