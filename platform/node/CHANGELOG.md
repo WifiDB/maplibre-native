@@ -74,7 +74,7 @@
 - Move module.cmake out of mapbox/cmake-node-module by @acalcutt in https://github.com/maplibre/maplibre-native/pull/821
 - Add mbgl-compiler-options to Node targets by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/826
 - Avoid implicit casts and make code more portable by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/716
-- Use `-_t` and `-_v` trait helpers from C++17 STL by @louwers in https://github.com/maplibre/maplibre-native/pull/731
+- Use `*_t` and `*_v` trait helpers from C++17 STL by @louwers in https://github.com/maplibre/maplibre-native/pull/731
 - Avoid implicit casts and portable printf with size_t by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/722
 
 ## 5.1.1
