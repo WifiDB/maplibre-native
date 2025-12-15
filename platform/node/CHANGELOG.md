@@ -1,4 +1,3 @@
-
 ## cr-hs-test-rel
 
 ### ✨ Features and improvements
@@ -7,14 +6,15 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
-## 6.3.0-pre.19
-* Updated supported node versions to v20, v22, and v24. Support for node v18 has been removed. ([#3760](https://github.com/maplibre/maplibre-native/pull/3760))
-* Updated NAN to v2.23.0 to support node v24 ([#3760](https://github.com/maplibre/maplibre-native/pull/3760))
-* Updated the linux binary to be built on Ubuntu 24.04 ([#3760](https://github.com/maplibre/maplibre-native/pull/3760))
-* Updated the macos binary to be built on macOS 15 ([#3863](https://github.com/maplibre/maplibre-native/pull/3863))
-* Moved node-pre-gyp back to @acalcutt/node-pre-gyp to support node v24. There is currently an issue with releases of @mapbox/node-pre-gyp which is preventing using it. ([#3760](https://github.com/maplibre/maplibre-native/pull/3760))
-* Add Windows arm64 binary build to ci and release workflows. ([#3760](https://github.com/maplibre/maplibre-native/pull/3760))
-* Add options parameter to addImage method in Node.js type definitions ([#3868](https://github.com/maplibre/maplibre-native/pull/3868))
+
+## 6.3.0-pre.20
+- Updated supported node versions to v20, v22, and v24. Support for node v18 has been removed. ([#3760](https://github.com/maplibre/maplibre-native/pull/3760))
+- Updated NAN to v2.23.0 to support node v24 ([#3760](https://github.com/maplibre/maplibre-native/pull/3760))
+- Updated the linux binary to be built on Ubuntu 24.04 ([#3760](https://github.com/maplibre/maplibre-native/pull/3760))
+- Updated the macos binary to be built on macOS 15 ([#3863](https://github.com/maplibre/maplibre-native/pull/3863))
+- Moved node-pre-gyp back to @acalcutt/node-pre-gyp to support node v24. There is currently an issue with releases of @mapbox/node-pre-gyp which is preventing using it. ([#3760](https://github.com/maplibre/maplibre-native/pull/3760))
+- Add Windows arm64 binary build to ci and release workflows. ([#3760](https://github.com/maplibre/maplibre-native/pull/3760))
+- Add options parameter to addImage method in Node.js type definitions ([#3868](https://github.com/maplibre/maplibre-native/pull/3868))
 
 ## 6.2.0
 - Fix freezing in macos/metal after ~32 renders ([Issue](https://github.com/maplibre/maplibre-native/issues/2928), [PR](https://github.com/maplibre/maplibre-native/pull/3673)).
@@ -65,45 +65,45 @@
 - Adjust Typings for Node Platform by @etnav in https://github.com/maplibre/maplibre-native/pull/871
 - Node platform improvements (added setSize and a new render call without render options object) by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/891
 - Move node ci+release to self hosted Ubuntu arm64 by @acalcutt in https://github.com/maplibre/maplibre-native/pull/873
-* Add windows support by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/707
-* Add Typings for Node Platform by @KiwiKilian in https://github.com/maplibre/maplibre-native/pull/766
-* Upgrade nan for node 19.x support by @mnutt in https://github.com/maplibre/maplibre-native/pull/853
-* Improve node docs with available platforms by @KiwiKilian in https://github.com/maplibre/maplibre-native/pull/786
-* Avoid implicit casts by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/787
-* Update node (ubuntu-20.04, arm64) docker build workflow by @acalcutt in https://github.com/maplibre/maplibre-native/pull/804
-* Move module.cmake out of mapbox/cmake-node-module by @acalcutt in https://github.com/maplibre/maplibre-native/pull/821
-* Add mbgl-compiler-options to Node targets by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/826
-* Avoid implicit casts and make code more portable by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/716
-* Use `*_t` and `*_v` trait helpers from C++17 STL by @louwers in https://github.com/maplibre/maplibre-native/pull/731
-* Avoid implicit casts and portable printf with size_t by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/722
+- Add windows support by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/707
+- Add Typings for Node Platform by @KiwiKilian in https://github.com/maplibre/maplibre-native/pull/766
+- Upgrade nan for node 19.x support by @mnutt in https://github.com/maplibre/maplibre-native/pull/853
+- Improve node docs with available platforms by @KiwiKilian in https://github.com/maplibre/maplibre-native/pull/786
+- Avoid implicit casts by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/787
+- Update node (ubuntu-20.04, arm64) docker build workflow by @acalcutt in https://github.com/maplibre/maplibre-native/pull/804
+- Move module.cmake out of mapbox/cmake-node-module by @acalcutt in https://github.com/maplibre/maplibre-native/pull/821
+- Add mbgl-compiler-options to Node targets by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/826
+- Avoid implicit casts and make code more portable by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/716
+- Use `*_t` and `*_v` trait helpers from C++17 STL by @louwers in https://github.com/maplibre/maplibre-native/pull/731
+- Avoid implicit casts and portable printf with size_t by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/722
 
 ## 5.1.1
-* Fix memory access violation exception in vector_tile_data.cpp by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/632
+- Fix memory access violation exception in vector_tile_data.cpp by @tdcosta100 in https://github.com/maplibre/maplibre-native/pull/632
 
 ## 5.1.0
-* First Maplibre Native Node Stable Release
-* Node workflow - build linux arm64 in a container #520 https://github.com/maplibre/maplibre-native/pull/590
+- First Maplibre Native Node Stable Release
+- Node workflow - build linux arm64 in a container #520 https://github.com/maplibre/maplibre-native/pull/590
 
 ## 5.0.1
-* Exclude Node 19 (ABI 111) because it breaks the node build by @acalcutt in https://github.com/maplibre/maplibre-native/pull/542
-* Fix mode switch not working in node version by @acalcutt in https://github.com/maplibre/maplibre-native/pull/415
-* Node release workflow by @acalcutt in https://github.com/maplibre/maplibre-native/pull/378 https://github.com/maplibre/maplibre-native/pull/459 https://github.com/maplibre/maplibre-native/pull/505 https://github.com/maplibre/maplibre-native/pull/512 https://github.com/maplibre/maplibre-native/pull/514
-* Add support for [image expression](https://docs.mapbox.com/mapbox-gl-js/style-spec/#expressions-types-image). ([#15877](https://github.com/mapbox/mapbox-gl-native/pull/15877))
-* [Breaking] Remove node 10 support. v5.0.1-pre.0 of the node package can be used a compatibility version.
-* Bring back node support by @jutaz in https://github.com/maplibre/maplibre-native/pull/217
+- Exclude Node 19 (ABI 111) because it breaks the node build by @acalcutt in https://github.com/maplibre/maplibre-native/pull/542
+- Fix mode switch not working in node version by @acalcutt in https://github.com/maplibre/maplibre-native/pull/415
+- Node release workflow by @acalcutt in https://github.com/maplibre/maplibre-native/pull/378 https://github.com/maplibre/maplibre-native/pull/459 https://github.com/maplibre/maplibre-native/pull/505 https://github.com/maplibre/maplibre-native/pull/512 https://github.com/maplibre/maplibre-native/pull/514
+- Add support for [image expression](https://docs.mapbox.com/mapbox-gl-js/style-spec/#expressions-types-image). ([#15877](https://github.com/mapbox/mapbox-gl-native/pull/15877))
+- [Breaking] Remove node 10 support. v5.0.1-pre.0 of the node package can be used a compatibility version.
+- Bring back node support by @jutaz in https://github.com/maplibre/maplibre-native/pull/217
 
 ## 5.0.0
-* No longer supporting source-compile fallback ([#15748](https://github.com/mapbox/mapbox-gl-native/pull/15748))
-* Add support for feature state APIs. ([#15480](https://github.com/mapbox/mapbox-gl-native/pull/15480))
+- No longer supporting source-compile fallback ([#15748](https://github.com/mapbox/mapbox-gl-native/pull/15748))
+- Add support for feature state APIs. ([#15480](https://github.com/mapbox/mapbox-gl-native/pull/15480))
 
 ## 4.3.0
-* Introduce `text-writing-mode` layout property for symbol layer ([#14932](https://github.com/mapbox/mapbox-gl-native/pull/14932)). The `text-writing-mode` layout property allows control over symbol's preferred writing mode. The new property value is an array, whose values are enumeration values from a ( `horizontal` | `vertical` ) set.
-* Fixed rendering and collision detection issues with using `text-variable-anchor` and `icon-text-fit` properties on the same layer ([#15367](https://github.com/mapbox/mapbox-gl-native/pull/15367)).
-* Fixed a rendering issue that non-SDF icon would be treated as SDF icon if they are in the same layer. ([#15456](https://github.com/mapbox/mapbox-gl-native/pull/15456))
-* Fixed a rendering issue of `collisionBox` when `text-translate` or `icon-translate` is enabled. ([#15467](https://github.com/mapbox/mapbox-gl-native/pull/15467))
-* Fixed an issue of integer overflow when converting `tileCoordinates` to `LatLon`, which caused issues such as `queryRenderedFeatures` and `querySourceFeatures` returning incorrect coordinates at zoom levels 20 and higher. ([#15560](https://github.com/mapbox/mapbox-gl-native/pull/15560))
-* Add typechecking while constructing legacy filter to prevent converting an unexpected filter type [#15389](https://github.com/mapbox/mapbox-gl-native/pull/15389).
-* Fixed an issue that `maxzoom` in style `Sources` option was ignored when URL resource is provided. It may cause problems such as extra tiles downloading at higher zoom level than `maxzoom`, or problems that wrong setting of `overscaledZ` in `OverscaledTileID` that will be passed to `SymbolLayout`, leading wrong rendering appearance. ([#15581](https://github.com/mapbox/mapbox-gl-native/pull/15581))
+- Introduce `text-writing-mode` layout property for symbol layer ([#14932](https://github.com/mapbox/mapbox-gl-native/pull/14932)). The `text-writing-mode` layout property allows control over symbol's preferred writing mode. The new property value is an array, whose values are enumeration values from a ( `horizontal` | `vertical` ) set.
+- Fixed rendering and collision detection issues with using `text-variable-anchor` and `icon-text-fit` properties on the same layer ([#15367](https://github.com/mapbox/mapbox-gl-native/pull/15367)).
+- Fixed a rendering issue that non-SDF icon would be treated as SDF icon if they are in the same layer. ([#15456](https://github.com/mapbox/mapbox-gl-native/pull/15456))
+- Fixed a rendering issue of `collisionBox` when `text-translate` or `icon-translate` is enabled. ([#15467](https://github.com/mapbox/mapbox-gl-native/pull/15467))
+- Fixed an issue of integer overflow when converting `tileCoordinates` to `LatLon`, which caused issues such as `queryRenderedFeatures` and `querySourceFeatures` returning incorrect coordinates at zoom levels 20 and higher. ([#15560](https://github.com/mapbox/mapbox-gl-native/pull/15560))
+- Add typechecking while constructing legacy filter to prevent converting an unexpected filter type [#15389](https://github.com/mapbox/mapbox-gl-native/pull/15389).
+- Fixed an issue that `maxzoom` in style `Sources` option was ignored when URL resource is provided. It may cause problems such as extra tiles downloading at higher zoom level than `maxzoom`, or problems that wrong setting of `overscaledZ` in `OverscaledTileID` that will be passed to `SymbolLayout`, leading wrong rendering appearance. ([#15581](https://github.com/mapbox/mapbox-gl-native/pull/15581))
 
 ## 4.2.0
 - Add an option to set whether or not an image should be treated as a SDF ([#15054](https://github.com/mapbox/mapbox-gl-native/issues/15054))
