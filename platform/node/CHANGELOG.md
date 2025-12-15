@@ -165,7 +165,7 @@
 
 ## 3.5.1 - May 8, 2017
 
-- Adds Node v6 binaries. --Note, Node v4 binaries will be removed on August 1st.-- ([#8884](https://github.com/mapbox/mapbox-gl-native/pull/8884))
+- Adds Node v6 binaries. **Note, Node v4 binaries will be removed on August 1st.** ([#8884](https://github.com/mapbox/mapbox-gl-native/pull/8884))
 - Adds linux debug binaries ([#8865](https://github.com/mapbox/mapbox-gl-native/pull/8865))
 
 ## 3.5.0 - April 20, 2017
