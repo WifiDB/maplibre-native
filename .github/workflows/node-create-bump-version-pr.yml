@@ -20,7 +20,5 @@ jobs:
     uses: acalcutt/reusable-workflows/.github/workflows/test.yml@main
     with:
       version: ${{ github.event.inputs.release_type }}
-      preid: ''
       package-folders: 'platform/node'
       changelog-path: 'platform/node/CHANGELOG.md'
-      nvmrc-path: ''
