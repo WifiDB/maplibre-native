@@ -17,7 +17,7 @@ on:
 
 jobs:
   bump-version-pr:
-    uses: maplibre/reusable-workflows/.github/workflows/create-bump-version-pr.yml@main
+    uses: acalcutt/reusable-workflows/.github/workflows/test.yml@main
     with:
       version: ${{ github.event.inputs.release_type }}
       preid: 'pre'
