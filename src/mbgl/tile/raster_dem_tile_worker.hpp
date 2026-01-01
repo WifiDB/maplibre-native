@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <string>
+#include <optional>
 
 namespace mbgl {
 
@@ -16,7 +17,11 @@ public:
 
     void parse(const std::shared_ptr<const std::string>& data,
                uint64_t correlationID,
-               Tileset::RasterEncoding encoding);
+               Tileset::RasterEncoding encoding,
+               std::optional<float> redFactor,
+               std::optional<float> greenFactor,
+               std::optional<float> blueFactor,
+               std::optional<float> baseShift);
 
 private:
     ActorRef<RasterDEMTile> parent;

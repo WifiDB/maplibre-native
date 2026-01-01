@@ -6,8 +6,19 @@ namespace mbgl {
 
 using namespace style;
 
-HillshadeBucket::HillshadeBucket(PremultipliedImage&& image_, Tileset::RasterEncoding encoding)
-    : demdata(image_, encoding) {}
+HillshadeBucket::HillshadeBucket(PremultipliedImage&& image_, Tileset::RasterEncoding encoding,
+                                 std::optional<float> redFactor,
+                                 std::optional<float> greenFactor,
+                                 std::optional<float> blueFactor,
+                                 std::optional<float> baseShift)
+    : demdata(image_, encoding, redFactor, greenFactor, blueFactor, baseShift) {}
+
+HillshadeBucket::HillshadeBucket(std::shared_ptr<PremultipliedImage> image_, Tileset::RasterEncoding encoding,
+                                 std::optional<float> redFactor,
+                                 std::optional<float> greenFactor,
+                                 std::optional<float> blueFactor,
+                                 std::optional<float> baseShift)
+    : demdata(*image_, encoding, redFactor, greenFactor, blueFactor, baseShift) {}
 
 HillshadeBucket::HillshadeBucket(DEMData&& demdata_)
     : demdata(std::move(demdata_)) {}

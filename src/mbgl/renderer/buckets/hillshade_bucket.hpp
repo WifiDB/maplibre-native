@@ -11,6 +11,7 @@
 #include <mbgl/util/tileset.hpp>
 #include <mbgl/util/image.hpp>
 #include <mbgl/util/mat4.hpp>
+#include <optional>
 
 namespace mbgl {
 
@@ -19,8 +20,16 @@ using HillshadeLayoutVertex = gfx::Vertex<TypeList<attributes::pos, attributes::
 
 class HillshadeBucket final : public Bucket {
 public:
-    HillshadeBucket(PremultipliedImage&&, Tileset::RasterEncoding encoding);
-    HillshadeBucket(std::shared_ptr<PremultipliedImage>, Tileset::RasterEncoding encoding);
+    HillshadeBucket(PremultipliedImage&&, Tileset::RasterEncoding encoding,
+                    std::optional<float> redFactor = std::nullopt,
+                    std::optional<float> greenFactor = std::nullopt,
+                    std::optional<float> blueFactor = std::nullopt,
+                    std::optional<float> baseShift = std::nullopt);
+    HillshadeBucket(std::shared_ptr<PremultipliedImage>, Tileset::RasterEncoding encoding,
+                    std::optional<float> redFactor = std::nullopt,
+                    std::optional<float> greenFactor = std::nullopt,
+                    std::optional<float> blueFactor = std::nullopt,
+                    std::optional<float> baseShift = std::nullopt);
     HillshadeBucket(DEMData&&);
     ~HillshadeBucket() override;
 

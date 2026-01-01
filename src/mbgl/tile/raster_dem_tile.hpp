@@ -4,6 +4,7 @@
 #include <mbgl/tile/tile_loader.hpp>
 #include <mbgl/tile/raster_dem_tile_worker.hpp>
 #include <mbgl/actor/actor.hpp>
+#include <optional>
 
 namespace mbgl {
 
@@ -100,6 +101,10 @@ private:
 
     uint64_t correlationID = 0;
     Tileset::RasterEncoding encoding;
+    std::optional<float> redFactor;
+    std::optional<float> greenFactor;
+    std::optional<float> blueFactor;
+    std::optional<float> baseShift;
 
     // Contains the Bucket object for the tile. Buckets are render
     // objects and they get added by tile parsing operations.

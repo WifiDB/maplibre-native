@@ -10,6 +10,10 @@ namespace style {
 struct SourceOptions {
     std::optional<Tileset::RasterEncoding> rasterEncoding = std::nullopt;
     std::optional<Tileset::VectorEncoding> vectorEncoding = std::nullopt;
+    std::optional<float> redFactor = std::nullopt;
+    std::optional<float> greenFactor = std::nullopt;
+    std::optional<float> blueFactor = std::nullopt;
+    std::optional<float> baseShift = std::nullopt;
 };
 
 // NOTE: Any derived class must invalidate `weakFactory` in the destructor

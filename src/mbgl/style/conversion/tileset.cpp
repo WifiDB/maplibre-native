@@ -43,6 +43,10 @@ std::optional<Tileset> Converter<Tileset>::operator()(const Convertible& value, 
     if (options) {
         if (const auto encoding = options->rasterEncoding) {
             result.rasterEncoding = encoding;
+            if (options->redFactor) result.redFactor = options->redFactor;
+            if (options->greenFactor) result.greenFactor = options->greenFactor;
+            if (options->blueFactor) result.blueFactor = options->blueFactor;
+            if (options->baseShift) result.baseShift = options->baseShift;
         }
         if (const auto encoding = options->vectorEncoding) {
             result.vectorEncoding = encoding;

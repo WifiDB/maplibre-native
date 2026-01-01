@@ -14,6 +14,23 @@ std::optional<SourceOptions> Converter<SourceOptions>::operator()(const Converti
             return {{.rasterEncoding = Tileset::RasterEncoding::Terrarium}};
         } else if (encoding && *encoding == "mapbox") {
             return {{.rasterEncoding = Tileset::RasterEncoding::Mapbox}};
+        } else if (encoding && *encoding == "custom") {
+            // parse optional custom factors
+            SourceOptions opts;
+            opts.rasterEncoding = Tileset::RasterEncoding::Custom;
+            if (const auto rf = objectMember(value, "redFactor")) {
+                if (auto v = toNumber(*rf)) opts.redFactor = static_cast<float>(*v);
+            }
+            if (const auto gf = objectMember(value, "greenFactor")) {
+                if (auto v = toNumber(*gf)) opts.greenFactor = static_cast<float>(*v);
+            }
+            if (const auto bf = objectMember(value, "blueFactor")) {
+                if (auto v = toNumber(*bf)) opts.blueFactor = static_cast<float>(*v);
+            }
+            if (const auto bs = objectMember(value, "baseShift")) {
+                if (auto v = toNumber(*bs)) opts.baseShift = static_cast<float>(*v);
+            }
+            return {{std::move(opts)}};
         } else if (encoding && *encoding == "mvt") {
             return {{.vectorEncoding = Tileset::VectorEncoding::Mapbox}};
         } else if (encoding && *encoding == "mlt") {

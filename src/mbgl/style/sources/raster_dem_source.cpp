@@ -32,6 +32,10 @@ void RasterDEMSource::setTilesetOverrides(Tileset& tileset) {
     if (options) {
         if (const auto encoding = options->rasterEncoding) {
             tileset.rasterEncoding = encoding;
+            if (options->redFactor) tileset.redFactor = options->redFactor;
+            if (options->greenFactor) tileset.greenFactor = options->greenFactor;
+            if (options->blueFactor) tileset.blueFactor = options->blueFactor;
+            if (options->baseShift) tileset.baseShift = options->baseShift;
         }
     }
 }
