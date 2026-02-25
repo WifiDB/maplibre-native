@@ -85,7 +85,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float4 position = drawable.matrix * float4(float2(vertx.pos), 0, 1);
     float2 pos = float2(vertx.texture_pos) / 8192.0;
-    pos.y = 1.0 - pos.y; // Flip Y for Metal texture coordinates
+    // Metal's texture coordinate origin differs from some renderers;
+    // restore Y-flip to match prepare pass and historical behavior.
+    pos.y = 1.0 - pos.y;
 
     return {
         .position    = position,
@@ -232,7 +234,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     float4 pixel = image.sample(image_sampler, in.pos);
 
     // Scale the derivative based on the mercator distortion at this latitude
-    float scaleFactor = cos(radians((tileProps.latrange.x - tileProps.latrange.y) * (1.0 - in.pos.y) + tileProps.latrange.y));
+    float latitude = (tileProps.latrange.x - tileProps.latrange.y) * in.pos.y + tileProps.latrange.y;
+    float scaleFactor = cos(radians(latitude));
 
     // The derivative is scaled back from [0, 1] texture range to world-space slope
     // Texture range [0, 1] corresponds to slope range [-4, 4]
