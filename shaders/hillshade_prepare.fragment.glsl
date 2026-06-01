@@ -53,7 +53,7 @@ void main() {
     // The exaggeration factor is applied to scale the effect at lower zooms.
     // See nickidlugash's awesome breakdown for more info
     // https://github.com/mapbox/mapbox-gl-js/pull/5286#discussion_r148419556
-    float exaggerationFactor = u_zoom < 4.5 ? 0.35 : 0.3;
+    float exaggerationFactor = u_zoom < 2.0 ? 0.4 : u_zoom < 4.5 ? 0.35 : 0.3;
     float exaggeration = u_zoom < 15.0 ? (u_zoom - 15.0) * exaggerationFactor : 0.0;
 
     vec2 deriv = vec2(

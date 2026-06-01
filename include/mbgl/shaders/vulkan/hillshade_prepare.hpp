@@ -111,7 +111,7 @@ void main() {
     // The conversion factor is: tileSize / (8 * meters_per_pixel).
     // meters_per_pixel is calculated as pow(2.0, 28.2562 - u_zoom).
     // The exaggeration factor is applied to scale the effect at lower zooms.
-    float exaggerationFactor = tileProps.zoom < 4.5 ? 0.35 : 0.3;
+    float exaggerationFactor = tileProps.zoom < 2.0 ? 0.4 : tileProps.zoom < 4.5 ? 0.35 : 0.3;
     float exaggeration = tileProps.zoom < 15.0 ? (tileProps.zoom - 15.0) * exaggerationFactor : 0.0;
 
     vec2 deriv = vec2(
