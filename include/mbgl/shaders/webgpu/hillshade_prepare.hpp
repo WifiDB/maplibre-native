@@ -95,9 +95,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     if (tileProps.zoom < 4.5) {
         exaggerationFactor = 0.35;
     }
-    if (tileProps.zoom < 2.0) {
-        exaggerationFactor = 0.4;
-    }
     var exaggeration = 0.0;
     if (tileProps.zoom < 15.0) {
         exaggeration = (tileProps.zoom - 15.0) * exaggerationFactor;
