@@ -233,6 +233,29 @@ void RenderTarget::renderDrapedLayerGroups(RenderOrchestrator& orchestrator, Pai
 
 void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& renderTree, PaintParameters& parameters) {
     if (drapeTileID) {
+        // Fast path: the per-target coverage scan below is O(draped drawables) and
+        // runs for every drape target, so on a busy terrain scene it dominates the
+        // frame even when nothing re-renders. But a target's baked content depends
+        // only on the drawables overlapping it (plus zoom and the property epoch),
+        // captured for every target in one pass as perTargetDrapeSignature. When
+        // this target's entry matches what it last evaluated against, no scan can
+        // find a difference - skip it. Unlike a single global signature, an
+        // unrelated tile loading elsewhere leaves this target's signature untouched,
+        // so during movement only the targets that actually changed re-scan.
+        std::size_t targetSignature = parameters.drapedContentSignature;
+        if (parameters.perTargetDrapeSignature) {
+            const auto it = parameters.perTargetDrapeSignature->find(*drapeTileID);
+            if (it != parameters.perTargetDrapeSignature->end()) {
+                targetSignature = it->second;
+            }
+        }
+        if (bakedSignature && *bakedSignature == targetSignature) {
+            return;
+        }
+
+        // Fast path missed: we pay the full O(draped drawables) scan. Count it so
+        // the overlay can show whether the short-circuit is actually engaging.
+        context.renderingStats().numDrapeCoverageScans++;
         const DrapeCoverage coverage = computeDrapeCoverage(orchestrator, parameters);
 
         // Render cache: a drape is rendered with a tile-local orthographic matrix,
@@ -243,6 +266,7 @@ void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& re
         // since panning changes none of them, and it is the maplibre-gl-js
         // behaviour (render a terrain tile's texture only when its stack changes).
         if (coverage.sameContentAs(bakedCoverage)) {
+            bakedSignature = targetSignature;
             return;
         }
 
@@ -257,9 +281,19 @@ void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& re
         // staleness: when its terrain tile leaves the cover it is destroyed.
         const bool propertiesChanged = coverage.propertiesEpoch != bakedCoverage.propertiesEpoch;
         if (!propertiesChanged && coverage.worseThan(bakedCoverage)) {
+            // Keeping the already-baked (better) content: record that at this
+            // signature the decision was to hold, so future identical frames skip
+            // the scan too. A real change (drawable set, zoom, properties) moves the
+            // signature and re-opens evaluation, preserving the anti-flicker intent.
+            bakedSignature = targetSignature;
             return;
         }
         bakedCoverage = coverage;
+        bakedSignature = targetSignature;
+
+        // Committed to re-rendering this drape (a cache miss). Count it so the
+        // measure-first overlay can show drape churn per frame.
+        context.renderingStats().numDrapeTargetsRendered++;
 
         // TEMP diagnostic: name drape targets that render with most of their
         // layers missing (throttled; remove before merging)

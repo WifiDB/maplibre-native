@@ -151,6 +151,14 @@ protected:
     // fewer layers / coarser fallbacks than it already shows (anti-flicker);
     // see RenderTarget::render.
     DrapeCoverage bakedCoverage;
+    // This target's own content signature (PaintParameters::perTargetDrapeSignature)
+    // as of the last frame it evaluated its coverage: a signature of just the
+    // drawables overlapping this target, plus zoom and the property epoch. While it
+    // is unchanged, nothing this target draws has changed, so its baked texture is
+    // still correct and the O(draped drawables) coverage scan is skipped. Being
+    // per-target (not global), an unrelated tile loading elsewhere no longer forces
+    // this target to re-scan. Unset until the target has been evaluated once.
+    std::optional<std::size_t> bakedSignature;
 };
 
 } // namespace mbgl

@@ -22,11 +22,18 @@
 #include <mbgl/util/logging.hpp>
 #include <mbgl/util/instrumentation.hpp>
 
+#include <mbgl/gfx/drawable.hpp>
 #include <mbgl/gfx/drawable_tweaker.hpp>
+#include <mbgl/renderer/layer_group.hpp>
 #include <mbgl/renderer/layer_tweaker.hpp>
 #include <mbgl/renderer/render_target.hpp>
 #include <mbgl/renderer/render_terrain.hpp>
 #include <mbgl/renderer/layers/terrain_layer_tweaker.hpp>
+#include <mbgl/util/hash.hpp>
+
+#include <cstdint>
+#include <functional>
+#include <map>
 
 #if MLN_RENDER_BACKEND_METAL
 #include <mbgl/mtl/renderer_backend.hpp>
@@ -295,6 +302,12 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
     // (RenderTarget::renderDrapedLayerGroups), so a tile at a different zoom than
     // the terrain cover is drawn into every target it covers, like gl-js.
 
+    // Per-drape-target content signatures for this frame (see
+    // PaintParameters::perTargetDrapeSignature). Populated in the tweaker pass
+    // below when terrain is active; must outlive the drape targets pass that reads
+    // it, hence the function scope. parameters points into it for the frame.
+    std::map<UnwrappedTileID, std::size_t> perTargetDrapeSignature;
+
     // Upload layer groups
     {
         const auto uploadPass = parameters.encoder->createUploadPass("layerGroup-upload",
@@ -306,22 +319,120 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
         // Update the debug layer groups
         orchestrator.updateDebugLayerGroups(renderTree, parameters);
 
+        // Compute the frame-global draped-content signature once (see
+        // PaintParameters::drapedContentSignature). It folds every input a terrain
+        // drape's baked content depends on - the ids of all draped drawables, the
+        // draped group count, the zoom, and the property epoch - and is reused both
+        // to gate the draped tweakers here and by the per-target drape short-circuit
+        // later this frame. Computed once, it is O(draped drawables), not per target.
+        const bool terrainActive = orchestrator.getRenderTerrain() != nullptr;
+        bool drapedContentChanged = true;
+        if (terrainActive) {
+            const double zoom = parameters.state.getZoom();
+            // Fold only the integer tile-zoom into drape signatures, not the continuous
+            // zoom. A drape tile's rasterized content is stable within a zoom level; a
+            // continuous zoom would change every target's signature on every frame of a
+            // pinch gesture, re-rendering all drape textures each frame (the dominant
+            // render-thread CPU cost). This caches drapes across pan/pitch/zoom-in-level,
+            // re-rendering only when crossing an integer zoom (where tiles change anyway).
+            const int32_t zoomLevel = static_cast<int32_t>(zoom);
+            const uint64_t propertiesEpoch = LayerTweaker::getPropertiesEpoch();
+
+            // Single pass over all draped drawables building three things:
+            //  - the global signature (order-dependent hash) for the tweaker gate;
+            //  - tileAccum[X]: order-independent sum of per-drawable hashes for the
+            //    drawables exactly at tile X;
+            //  - subtreeAccum[X]: the same, but for X and every tile below it, built
+            //    by adding each drawable's hash to all of its ancestors (and itself).
+            // From these, a target's own content signature is a couple of O(depth)
+            // lookups instead of another full O(drawables) scan.
+            std::size_t signature = 0;
+            std::size_t drapedGroupCount = 0;
+            std::map<UnwrappedTileID, std::size_t> tileAccum;
+            std::map<UnwrappedTileID, std::size_t> subtreeAccum;
+            const std::hash<std::int64_t> hashId;
+            orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) {
+                if (layerGroup.getType() != LayerGroupBase::Type::TileLayerGroup ||
+                    !layerGroup.shouldRenderToTerrain()) {
+                    return;
+                }
+                drapedGroupCount++;
+                static_cast<TileLayerGroup&>(layerGroup).visitDrawables([&](const gfx::Drawable& drawable) {
+                    if (!drawable.getEnabled() || !drawable.getTileID()) {
+                        return;
+                    }
+                    util::hash_combine(signature, drawable.getID().id());
+                    const std::size_t h = hashId(drawable.getID().id());
+                    const UnwrappedTileID tile = drawable.getTileID()->toUnwrapped();
+                    tileAccum[tile] += h;
+                    // Add to this tile and every ancestor up to z0 (order-independent
+                    // sum, so traversal order does not matter)
+                    for (int zz = tile.canonical.z; zz >= 0; --zz) {
+                        subtreeAccum[UnwrappedTileID(tile.wrap, tile.canonical.scaledTo(static_cast<uint8_t>(zz)))] +=
+                            h;
+                    }
+                });
+            });
+            util::hash_combine(signature, drapedGroupCount);
+            util::hash_combine(signature, zoomLevel);
+            util::hash_combine(signature, propertiesEpoch);
+            parameters.drapedContentSignature = signature;
+            drapedContentChanged = (lastDrapedContentSignature != signature);
+            lastDrapedContentSignature = signature;
+
+            // Build each drape target's own signature: the drawables in its subtree
+            // (itself + descendants) plus those at its strict ancestors, folded with
+            // the global zoom / property epoch / group count.
+            const auto lookup = [](const std::map<UnwrappedTileID, std::size_t>& m, const UnwrappedTileID& k) {
+                const auto it = m.find(k);
+                return it == m.end() ? std::size_t{0} : it->second;
+            };
+            orchestrator.visitRenderTargets([&](RenderTarget& renderTarget) {
+                const auto& tid = renderTarget.getDrapeTileID();
+                if (!tid) {
+                    return;
+                }
+                std::size_t sig = lookup(subtreeAccum, *tid); // self + descendants
+                for (int zz = static_cast<int>(tid->canonical.z) - 1; zz >= 0; --zz) {
+                    sig += lookup(tileAccum,
+                                  UnwrappedTileID(tid->wrap, tid->canonical.scaledTo(static_cast<uint8_t>(zz))));
+                }
+                util::hash_combine(sig, drapedGroupCount);
+                util::hash_combine(sig, zoomLevel);
+                util::hash_combine(sig, propertiesEpoch);
+                perTargetDrapeSignature[*tid] = sig;
+            });
+            parameters.perTargetDrapeSignature = &perTargetDrapeSignature;
+        }
+
         // Tweakers are run in the upload pass so they can set up uniforms.
         parameters.currentLayer = 0;
         orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) {
-            layerGroup.runTweakers(renderTree, parameters);
+            // Skip a draped layer group's tweaker when the drape content is
+            // unchanged: its cached drape texture is not re-rendered this frame,
+            // and drapes are camera-independent (rendered with a tile-local matrix),
+            // so the recomputed per-drawable camera UBOs would go unused. A real
+            // change moves the signature and re-runs the tweaker the same frame the
+            // drape re-renders, keeping the two consistent.
+            const bool skipDrapedTweaker = terrainActive && !drapedContentChanged &&
+                                           layerGroup.shouldRenderToTerrain();
+            if (!skipDrapedTweaker) {
+                layerGroup.runTweakers(renderTree, parameters);
+            }
             parameters.currentLayer++;
         });
 
         // Run terrain tweaker if terrain is enabled
         if (auto* terrain = orchestrator.getRenderTerrain()) {
             if (auto* terrainTweaker = terrain->getTweaker()) {
+                const double start = util::MonotonicTimer::now().count();
                 if (const auto& layerGroup = terrain->getLayerGroup()) {
                     terrainTweaker->execute(*layerGroup, parameters);
                 }
                 if (const auto& depthLayerGroup = terrain->getDepthLayerGroup()) {
                     terrainTweaker->execute(*depthLayerGroup, parameters);
                 }
+                context.renderingStats().terrainTweakerTime = util::MonotonicTimer::now().count() - start;
             }
         }
 
@@ -416,6 +527,15 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
         // maximum slope (the prepare pass encodes flat as 0.5, not 0), shading the
         // whole tile solid. Draw the producers first, then the drapes that sample
         // them.
+
+        // Per-frame reset for the drape-churn measurement: RenderTarget::render
+        // increments these for each drape it re-renders (a cache miss) and for
+        // each one that runs the full coverage scan (a fast-path miss).
+        context.renderingStats().numDrapeTargetsRendered = 0;
+        context.renderingStats().numDrapeCoverageScans = 0;
+        // parameters.drapedContentSignature was computed once earlier this frame
+        // (before the tweaker pass) and is reused by each target's short-circuit.
+
         orchestrator.visitRenderTargets([&](RenderTarget& renderTarget) {
             if (!renderTarget.getDrapeTileID()) {
                 renderTarget.render(orchestrator, renderTree, parameters);
@@ -523,7 +643,9 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
     drawableTargetsPass();
     // Terrain depth pass for symbol occlusion (sampled by calculate_visibility)
     if (auto* terrain = orchestrator.getRenderTerrain()) {
+        const double start = util::MonotonicTimer::now().count();
         terrain->renderDepth(orchestrator, renderTree, parameters);
+        context.renderingStats().terrainDepthTime = util::MonotonicTimer::now().count() - start;
     }
     commonClearPass();
     context.bindGlobalUniformBuffers(*parameters.renderPass);

@@ -9,7 +9,9 @@
 #include <Foundation/Foundation.hpp>
 #endif // MLN_RENDER_BACKEND_METAL
 
+#include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace mbgl {
@@ -55,6 +57,13 @@ private:
     /// tile-sized target every frame - churning GPU memory and discarding the
     /// baked content that suppresses drape flicker.
     TexturePool texturePool{512}; // TODO: tile size
+
+    // Frame-global draped-content signature (see PaintParameters::drapedContentSignature)
+    // from the previous frame. When it is unchanged, the draped layer groups' tweakers
+    // are skipped: their per-drawable UBOs still describe the cached drape textures,
+    // which are camera-independent (rendered with a tile-local matrix), so recomputing
+    // them would be wasted work. std::nullopt until the first terrain frame.
+    std::optional<std::size_t> lastDrapedContentSignature;
 
     gfx::RendererBackend& backend;
 
