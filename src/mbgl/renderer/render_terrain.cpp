@@ -15,6 +15,10 @@
 #include <mbgl/geometry/dem_data.hpp>
 #include <mbgl/tile/raster_dem_tile.hpp>
 #include <mbgl/tile/tile.hpp>
+#if MLN_RENDER_BACKEND_OPENGL
+#include <mbgl/gl/context.hpp>
+#include <mbgl/gl/texture_2d_array.hpp>
+#endif
 #include <mbgl/gfx/context.hpp>
 #include <mbgl/gfx/renderable.hpp>
 #include <mbgl/gfx/renderer_backend.hpp>
@@ -29,6 +33,8 @@
 #include <mbgl/shaders/shader_defines.hpp>
 #include <mbgl/shaders/segment.hpp>
 #include <mbgl/util/constants.hpp>
+#include <mbgl/util/geo.hpp>
+#include <mbgl/math/angles.hpp>
 #include <mbgl/util/logging.hpp>
 #include <mbgl/util/image.hpp>
 #include <mbgl/util/mat4.hpp>
@@ -88,7 +94,7 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
                            gfx::ShaderRegistry& shaders,
                            gfx::Context& context,
                            const TexturePool& texturePool,
-                           const TransformState& /*state*/,
+                           const TransformState& state,
                            const std::shared_ptr<UpdateParameters>& /*updateParameters*/,
                            const RenderTree& /*renderTree*/,
                            UniqueChangeRequestVec& changes) {
@@ -161,6 +167,11 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
             } else if (auto texture = createDEMTexture(context, *demData)) {
                 // Keep the texture available for elevation sampling by non-draped layers
                 demTextures[renderTile.id] = {texture, demData->dim, demUpdateCounter};
+#if MLN_RENDER_BACKEND_OPENGL
+                // Also pack this tile's DEM into the array for the (upcoming) instanced
+                // depth pass. Additive: the per-tile texture above is still the fallback.
+                packDEMArrayLayer(context, renderTile.id, *demData);
+#endif
             }
         }
     }
@@ -173,7 +184,37 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
     for (const auto& renderTile : *renderTiles) {
         renderTileIDs.insert(renderTile.id);
     }
-    const std::set<UnwrappedTileID> meshTiles = expandToDeepestCover(renderTileIDs);
+    std::set<UnwrappedTileID> meshTiles = expandToDeepestCover(renderTileIDs);
+
+    // Cap the mesh tile count: keep those nearest the map center, drop the farthest
+    // (the horizon tiles a high tilt pulls in). Everything downstream - drape
+    // targets, re-renders, depth draws - scales with this count.
+    if (MAX_MESH_TILES > 0 && meshTiles.size() > MAX_MESH_TILES) {
+        // Map center in normalized web-mercator [0,1] (standard projection)
+        const LatLng center = state.getLatLng();
+        const double cx = center.longitude() / 360.0 + 0.5;
+        const double latRad = util::deg2rad(center.latitude());
+        const double cy = 0.5 - std::log(std::tan(M_PI / 4.0 + latRad / 2.0)) / (2.0 * M_PI);
+
+        const auto tileDist2 = [&](const UnwrappedTileID& id) {
+            const double scale = static_cast<double>(1u << id.canonical.z);
+            const double tx = (static_cast<double>(id.canonical.x) + 0.5) / scale + id.wrap;
+            const double ty = (static_cast<double>(id.canonical.y) + 0.5) / scale;
+            const double dx = tx - cx;
+            const double dy = ty - cy;
+            return dx * dx + dy * dy;
+        };
+
+        std::vector<UnwrappedTileID> sorted(meshTiles.begin(), meshTiles.end());
+        std::partial_sort(sorted.begin(),
+                          sorted.begin() + static_cast<std::ptrdiff_t>(MAX_MESH_TILES),
+                          sorted.end(),
+                          [&](const UnwrappedTileID& a, const UnwrappedTileID& b) {
+                              return tileDist2(a) < tileDist2(b);
+                          });
+        meshTiles = std::set<UnwrappedTileID>(sorted.begin(),
+                                              sorted.begin() + static_cast<std::ptrdiff_t>(MAX_MESH_TILES));
+    }
 
     // Drop drawables and cached DEM textures for tiles that left the mesh tile
     // set, keeping everything else intact between frames
@@ -185,9 +226,11 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
         [&](gfx::Drawable& drawable) { return drawable.getTileID() && !currentTiles.contains(*drawable.getTileID()); });
     auto* depthLg = static_cast<LayerGroup*>(depthLayerGroup.get());
     if (depthLg) {
-        depthLg->removeDrawablesIf([&](gfx::Drawable& drawable) {
-            return drawable.getTileID() && !currentTiles.contains(*drawable.getTileID());
-        });
+        if (depthLg->removeDrawablesIf([&](gfx::Drawable& drawable) {
+                return drawable.getTileID() && !currentTiles.contains(*drawable.getTileID());
+            }) > 0) {
+            depthDirty = true;
+        }
     }
     for (auto it = tilesWithDrawables.begin(); it != tilesWithDrawables.end();) {
         if (!currentTiles.contains(it->first)) {
@@ -209,7 +252,14 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
                 break;
             }
         }
-        it = related ? std::next(it) : demTextures.erase(it);
+        if (related) {
+            it = std::next(it);
+        } else {
+#if MLN_RENDER_BACKEND_OPENGL
+            freeDEMArrayLayer(it->first);
+#endif
+            it = demTextures.erase(it);
+        }
     }
     // Cap the cache: ancestor/descendant relations accumulate while browsing
     // (zooming makes whole chains "related"), which previously grew past 2GB
@@ -227,6 +277,9 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
             if (demTextures.size() <= maxDEMTextures) {
                 break;
             }
+#if MLN_RENDER_BACKEND_OPENGL
+            freeDEMArrayLayer(id);
+#endif
             demTextures.erase(id);
         }
     }
@@ -315,6 +368,7 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
             if (depthLg) {
                 depthLg->removeDrawablesIf(
                     [&](gfx::Drawable& drawable) { return drawable.getTileID() && *drawable.getTileID() == tileID; });
+                depthDirty = true;
             }
             tilesWithDrawables.erase(existing);
         }
@@ -333,6 +387,7 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
                 if (auto depthDrawable = createDrawableForTile(
                         context, shaders, tileID, demTexture, nullptr, /*depthPass=*/true)) {
                     depthLg->addDrawable(std::move(depthDrawable));
+                    depthDirty = true;
                 }
             }
         }
@@ -469,8 +524,23 @@ void RenderTerrain::renderDepth(RenderOrchestrator& orchestrator,
         // Far plane everywhere the terrain does not cover (unpack_depth(1,1,1,1) ~ 1.0)
         depthRenderTarget->setClearColor(Color::white());
         depthRenderTarget->addLayerGroup(depthLayerGroup, /*replace=*/true);
+        depthDirty = true; // fresh target must be drawn
     }
+
+    // The packed-depth output is a function of the camera projection and the terrain
+    // mesh set only. When neither changed since the last depth render, the existing
+    // depth texture is still correct - skip the whole pass (~one mesh draw per tile,
+    // each with a vertex-texture-fetch of the DEM). This is what makes a static scene
+    // cheap; the depth is redrawn only on camera movement or a mesh/tile change.
+    const mat4& proj = parameters.transformParams.projMatrix;
+    const bool cameraMoved = !lastDepthProjMatrix || *lastDepthProjMatrix != proj;
+    if (!depthDirty && !cameraMoved) {
+        return;
+    }
+
     depthRenderTarget->render(orchestrator, renderTree, parameters);
+    lastDepthProjMatrix = proj;
+    depthDirty = false;
 }
 
 const std::shared_ptr<gfx::Texture2D>& RenderTerrain::getDepthTexture(gfx::Context& context) {
@@ -694,10 +764,15 @@ std::unique_ptr<gfx::Drawable> RenderTerrain::createDrawableForTile(gfx::Context
         builder->setEnableDepth(true);
         builder->setIs3D(true);
     } else {
-        builder->setDepthType(gfx::DepthMaskType::ReadOnly); // Don't write depth
+        // Match maplibre-gl-js / Mapbox: the terrain surface is opaque 3D geometry
+        // drawn with a depth test+write (LEQUAL, ReadWrite), not the earlier
+        // depth-off / "2D for now" hack. On tiled GPUs (this device is PowerVR) opaque
+        // depth-tested geometry is eligible for hidden-surface removal, so occluded
+        // fragments skip the drape sample instead of always running it.
+        builder->setDepthType(gfx::DepthMaskType::ReadWrite);
         builder->setColorMode(gfx::ColorMode::unblended());
-        builder->setEnableDepth(false); // Disable depth testing
-        builder->setIs3D(false);        // Treat as 2D for now
+        builder->setEnableDepth(true);
+        builder->setIs3D(true);
     }
 
     // Set vertex data - copy vertices to raw buffer
@@ -768,5 +843,44 @@ void RenderTerrain::activateLayerGroup(bool activate, UniqueChangeRequestVec& ch
         }
     }
 }
+
+#if MLN_RENDER_BACKEND_OPENGL
+void RenderTerrain::packDEMArrayLayer(gfx::Context& context, const UnwrappedTileID& id, const DEMData& demData) {
+    const auto& imagePtr = demData.getImagePtr();
+    if (!imagePtr || imagePtr->size.isEmpty()) {
+        return;
+    }
+    if (!demTextureArray) {
+        demTextureArray = std::make_unique<gl::Texture2DArray>(static_cast<gl::Context&>(context));
+    }
+    // All DEM tiles from one source share a size, so this allocates once and no-ops after.
+    demTextureArray->allocate(imagePtr->size, maxDEMArrayLayers);
+    if (!demTextureArray->valid()) {
+        return;
+    }
+
+    uint32_t layer = 0;
+    if (const auto it = demArrayLayer.find(id); it != demArrayLayer.end()) {
+        layer = it->second; // re-upload into the tile's existing slot
+    } else if (!demArrayFreeLayers.empty()) {
+        layer = demArrayFreeLayers.back();
+        demArrayFreeLayers.pop_back();
+        demArrayLayer[id] = layer;
+    } else if (demArrayNextLayer < maxDEMArrayLayers) {
+        layer = demArrayNextLayer++;
+        demArrayLayer[id] = layer;
+    } else {
+        return; // array full - tile keeps its per-tile texture, just not instanced
+    }
+    demTextureArray->uploadLayer(layer, imagePtr->data.get());
+}
+
+void RenderTerrain::freeDEMArrayLayer(const UnwrappedTileID& id) {
+    if (const auto it = demArrayLayer.find(id); it != demArrayLayer.end()) {
+        demArrayFreeLayers.push_back(it->second);
+        demArrayLayer.erase(it);
+    }
+}
+#endif
 
 } // namespace mbgl
