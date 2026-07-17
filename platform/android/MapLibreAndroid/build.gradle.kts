@@ -69,6 +69,9 @@ android {
             "\"MapLibre Android/${project.extra["versionName"]}\""
         )
         consumerProguardFiles("proguard-rules.pro")
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     flavorDimensions += "renderer"
