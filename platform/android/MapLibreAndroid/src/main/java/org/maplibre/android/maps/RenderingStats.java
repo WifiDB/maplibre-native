@@ -72,4 +72,17 @@ public class RenderingStats {
   public int stencilClears = 0;
   /// Number of stencil buffer updates
   public int stencilUpdates = 0;
+
+  /// Number of terrain drape targets actually re-rendered this frame (cache misses).
+  /// Panning a static terrain scene should keep this at 0.
+  public int numDrapeTargetsRendered = 0;
+
+  /// Number of terrain drape targets that ran the full per-target coverage scan this
+  /// frame (fast-path misses). Should be ~0 on a static scene once loaded.
+  public int numDrapeCoverageScans = 0;
+
+  /// Per-phase CPU time of the terrain path this frame (seconds).
+  public double terrainUpdateTime = 0.0;
+  public double terrainTweakerTime = 0.0;
+  public double terrainDepthTime = 0.0;
 }

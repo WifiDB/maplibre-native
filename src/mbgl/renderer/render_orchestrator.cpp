@@ -1,5 +1,7 @@
 #include <mbgl/renderer/render_orchestrator.hpp>
 
+#include <mbgl/gfx/context.hpp>
+#include <mbgl/util/monotonic_timer.hpp>
 #include <mbgl/annotation/annotation_manager.hpp>
 #include <mbgl/layermanager/layer_manager.hpp>
 #include <mbgl/renderer/change_request.hpp>
@@ -1010,7 +1012,9 @@ void RenderOrchestrator::updateLayers(gfx::ShaderRegistry& shaders,
 
     // Update terrain if enabled
     if (renderTerrain && renderTerrain->isEnabled()) {
+        const double start = util::MonotonicTimer::now().count();
         renderTerrain->update(*this, shaders, context, texturePool, state, updateParameters, renderTree, changes);
+        context.renderingStats().terrainUpdateTime = util::MonotonicTimer::now().count() - start;
     }
 
     addChanges(changes);
