@@ -14,6 +14,7 @@
 #include <mbgl/util/string.hpp>
 
 #if defined(MLN_VALIDATE_UNIFORM_BLOCK_BINDINGS)
+#include <limits>
 #include <unordered_set>
 #endif
 
@@ -97,19 +98,34 @@ void DrawableGL::draw(PaintParameters& parameters) const {
     }
 #endif
 
+    // One instance per instance-attribute entry (mirrors the Metal backend); no
+    // instance attributes means a single, ordinary draw (drawInstanced falls back).
+    // getMinCount() returns SIZE_MAX for an empty array, so guard against that.
+    const auto& instanceAttrs = getInstanceAttributes();
+    std::size_t instanceCount = instanceAttrs ? instanceAttrs->getMinCount() : 1;
+    if (instanceCount == std::numeric_limits<std::size_t>::max()) {
+        instanceCount = 1;
+    }
+
     for (const auto& seg : impl->segments) {
         const auto& glSeg = static_cast<DrawSegmentGL&>(*seg);
         const auto& mlSeg = glSeg.getSegment();
         if (mlSeg.indexLength > 0 && glSeg.getVertexArray().isValid()) {
             context.bindVertexArray = glSeg.getVertexArray().getID();
-            context.draw(glSeg.getMode(), mlSeg.indexOffset, mlSeg.indexLength);
+            context.drawInstanced(glSeg.getMode(), mlSeg.indexOffset, mlSeg.indexLength, instanceCount);
         }
     }
     // Unbind the VAO so that future buffer commands outside Drawable do not change the current VAO state
     context.bindVertexArray = value::BindVertexArray::Default;
 
-    unbindTextures();
-    impl->uniformBuffers.unbind();
+    // Deliberately do NOT unbind textures / uniform buffers here. Unbinding after
+    // every drawable only resets the binding points to 0, which the very next
+    // drawable's bind() immediately overwrites - pure per-draw GL-call churn (a
+    // glBindBufferBase(0) per UBO, a texture unbind per unit, for all ~hundreds of
+    // draws a frame). Leaving the previous bindings in place is correct: each
+    // drawable binds everything it needs before drawing, and a stale binding is only
+    // ever read by a drawable that failed to bind its own (a pre-existing bug that
+    // unbinding would turn into a "no buffer bound" the driver likes even less).
 }
 
 void DrawableGL::setIndexData(gfx::IndexVectorBasePtr indexes, std::vector<UniqueDrawSegment> segments) {
@@ -208,8 +224,10 @@ void DrawableGL::upload(gfx::UploadPass& uploadPass) {
     }
 
     // Build the vertex attributes and bindings, if necessary
+    const auto& instanceAttrs = getInstanceAttributes();
     if (impl->attributeBindings.empty() ||
-        (vertexAttributes && (!attributeUpdateTime || vertexAttributes->isModifiedAfter(*attributeUpdateTime)))) {
+        (vertexAttributes && (!attributeUpdateTime || vertexAttributes->isModifiedAfter(*attributeUpdateTime))) ||
+        (instanceAttrs && (!attributeUpdateTime || instanceAttrs->isModifiedAfter(*attributeUpdateTime)))) {
         MLN_TRACE_ZONE(build attributes);
 
         // Apply drawable values to shader defaults
@@ -231,6 +249,35 @@ void DrawableGL::upload(gfx::UploadPass& uploadPass) {
                                                                     vertexBuffers);
 
         impl->attributeBuffers = std::move(vertexBuffers);
+
+        // Build per-instance attribute bindings and merge them into the same binding
+        // array (mirrors the Metal backend). Instance attributes use shader attribute
+        // locations distinct from the per-vertex ones, so they slot in by index; each
+        // gets divisor 1 so it advances once per instance rather than per vertex.
+        if (instanceAttrs) {
+            std::vector<std::unique_ptr<gfx::VertexBufferResource>> instanceBuffers;
+            auto instanceBindings = uploadPass.buildAttributeBindings(instanceAttrs->getMinCount(),
+                                                                      gfx::AttributeDataType::Byte,
+                                                                      static_cast<std::size_t>(-1),
+                                                                      /*vertexData=*/{},
+                                                                      shader->getInstanceAttributes(),
+                                                                      *instanceAttrs,
+                                                                      usage,
+                                                                      attributeUpdateTime,
+                                                                      instanceBuffers);
+            for (std::size_t i = 0; i < instanceBindings.size(); ++i) {
+                if (instanceBindings[i]) {
+                    instanceBindings[i]->divisor = 1;
+                    if (impl->attributeBindings.size() <= i) {
+                        impl->attributeBindings.resize(i + 1);
+                    }
+                    impl->attributeBindings[i] = instanceBindings[i];
+                }
+            }
+            for (auto& b : instanceBuffers) {
+                impl->attributeBuffers.push_back(std::move(b));
+            }
+        }
     }
 
     // Bind a VAO for each group of vertexes described by a segment
@@ -244,7 +291,9 @@ void DrawableGL::upload(gfx::UploadPass& uploadPass) {
         }
 
         for (auto& binding : impl->attributeBindings) {
-            if (binding) {
+            // Per-instance bindings (divisor != 0) are indexed by instance, not by the
+            // segment's vertex offset, so leave their offset untouched.
+            if (binding && binding->divisor == 0) {
                 binding->vertexOffset = static_cast<uint32_t>(mlSeg.vertexOffset);
             }
         }
