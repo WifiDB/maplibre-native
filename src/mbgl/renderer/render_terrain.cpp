@@ -1,6 +1,13 @@
 #include <mbgl/renderer/render_terrain.hpp>
 #include <mbgl/renderer/update_parameters.hpp>
 #include <mbgl/renderer/render_source.hpp>
+
+// TEMP: LOD zoom-distribution diagnostic (Phase 0). Remove after.
+#if defined(__ANDROID__)
+#include <android/log.h>
+#include <array>
+#include <string>
+#endif
 #include <mbgl/renderer/render_tile.hpp>
 #include <mbgl/renderer/render_pass.hpp>
 #include <mbgl/renderer/render_tree.hpp>
@@ -185,6 +192,36 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
         renderTileIDs.insert(renderTile.id);
     }
     std::set<UnwrappedTileID> meshTiles = expandToDeepestCover(renderTileIDs);
+
+#if defined(__ANDROID__)
+    // TEMP Phase 0: zoom histograms of the DEM source cover (renderTileIDs) vs the mesh
+    // set after expandToDeepestCover. If the source cover already has a spread of zooms
+    // (LOD) but the mesh set is flattened to one deep zoom, expandToDeepestCover is the
+    // anti-LOD; if the source cover is itself single-zoom, LOD must be added at cover time.
+    {
+        static uint32_t lodThrottle = 0;
+        if (++lodThrottle % 30 == 1) {
+            const auto histo = [](const std::set<UnwrappedTileID>& tiles) {
+                std::array<int, 30> byZoom{};
+                for (const auto& t : tiles) {
+                    if (t.canonical.z < 30) byZoom[t.canonical.z]++;
+                }
+                std::string s;
+                for (int z = 0; z < 30; ++z) {
+                    if (byZoom[z]) s += "z" + std::to_string(z) + ":" + std::to_string(byZoom[z]) + " ";
+                }
+                return s;
+            };
+            __android_log_print(ANDROID_LOG_ERROR,
+                                "DRAPE",
+                                "LOD source[%zu]{%s} mesh[%zu]{%s}",
+                                renderTileIDs.size(),
+                                histo(renderTileIDs).c_str(),
+                                meshTiles.size(),
+                                histo(meshTiles).c_str());
+        }
+    }
+#endif
 
     // Cap the mesh tile count: keep those nearest the map center, drop the farthest
     // (the horizon tiles a high tilt pulls in). Everything downstream - drape
@@ -524,23 +561,16 @@ void RenderTerrain::renderDepth(RenderOrchestrator& orchestrator,
         // Far plane everywhere the terrain does not cover (unpack_depth(1,1,1,1) ~ 1.0)
         depthRenderTarget->setClearColor(Color::white());
         depthRenderTarget->addLayerGroup(depthLayerGroup, /*replace=*/true);
-        depthDirty = true; // fresh target must be drawn
     }
 
-    // The packed-depth output is a function of the camera projection and the terrain
-    // mesh set only. When neither changed since the last depth render, the existing
-    // depth texture is still correct - skip the whole pass (~one mesh draw per tile,
-    // each with a vertex-texture-fetch of the DEM). This is what makes a static scene
-    // cheap; the depth is redrawn only on camera movement or a mesh/tile change.
-    const mat4& proj = parameters.transformParams.projMatrix;
-    const bool cameraMoved = !lastDepthProjMatrix || *lastDepthProjMatrix != proj;
-    if (!depthDirty && !cameraMoved) {
-        return;
-    }
-
+    // Render the packed depth every frame, matching upstream. It was previously gated on
+    // camera-projection changes to save a mesh pass on static scenes, but that gate did not
+    // invalidate on DEM/terrain-shape changes: while DEM tiles stream in during warmup, the
+    // terrain surface (and the symbol anchors displaced onto it) shift, but the frozen depth
+    // texture did not, so symbol occlusion (calculate_visibility) went out of sync and labels
+    // that had appeared were wrongly culled ("appear at warmup, then vanish"). Drawing it
+    // every frame keeps the depth in lockstep with the terrain, as upstream does.
     depthRenderTarget->render(orchestrator, renderTree, parameters);
-    lastDepthProjMatrix = proj;
-    depthDirty = false;
 }
 
 const std::shared_ptr<gfx::Texture2D>& RenderTerrain::getDepthTexture(gfx::Context& context) {
@@ -751,11 +781,14 @@ std::unique_ptr<gfx::Drawable> RenderTerrain::createDrawableForTile(gfx::Context
         return nullptr;
     }
 
-    // Configure builder - terrain is 3D and writes depth
-    // NOTE: Using Translucent pass because Opaque pass renders in REVERSE order (high index = back)
-    // TEMP: Disable depth testing to render on top of everything
+    // Configure builder - terrain is 3D, depth-tested, unblended. This matches upstream
+    // PR #4389 exactly: the surface goes in the Translucent pass. It must NOT be moved to
+    // the Opaque pass - doing so writes depth into the main framebuffer before symbols are
+    // drawn, and the labels then get depth-culled against the very surface they sit on and
+    // vanish ("labels appear at warmup, then get covered"). Symbol occlusion by terrain is
+    // handled separately in the shader via the packed depth texture (calculate_visibility).
     builder->setShader(terrainShader);
-    builder->setRenderPass(RenderPass::Translucent); // Translucent pass renders in forward order (high index = front)
+    builder->setRenderPass(RenderPass::Translucent);
     if (depthPass) {
         // The depth pass renders packed depth with real depth testing so the
         // nearest surface wins, into the terrain depth target (renderDepth)
@@ -764,11 +797,6 @@ std::unique_ptr<gfx::Drawable> RenderTerrain::createDrawableForTile(gfx::Context
         builder->setEnableDepth(true);
         builder->setIs3D(true);
     } else {
-        // Match maplibre-gl-js / Mapbox: the terrain surface is opaque 3D geometry
-        // drawn with a depth test+write (LEQUAL, ReadWrite), not the earlier
-        // depth-off / "2D for now" hack. On tiled GPUs (this device is PowerVR) opaque
-        // depth-tested geometry is eligible for hidden-surface removal, so occluded
-        // fragments skip the drape sample instead of always running it.
         builder->setDepthType(gfx::DepthMaskType::ReadWrite);
         builder->setColorMode(gfx::ColorMode::unblended());
         builder->setEnableDepth(true);
