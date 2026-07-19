@@ -151,6 +151,31 @@ void Context::endFrame() {
 void Context::initializeExtensions(const std::function<gl::ProcAddress(const char*)>& getProcAddress) {
     MLN_TRACE_FUNC();
 
+    // Detect EXT_buffer_storage robustly: glGetString(GL_EXTENSIONS) can return null on a
+    // core GLES 3.x context, so fall back to the indexed glGetStringi query.
+    bool hasBufferStorage = false;
+    if (const auto* extList = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS))) {
+        hasBufferStorage = strstr(extList, "GL_EXT_buffer_storage") != nullptr;
+    } else {
+        GLint numExt = 0;
+        glGetIntegerv(GL_NUM_EXTENSIONS, &numExt);
+        for (GLint i = 0; i < numExt; ++i) {
+            const auto* e = reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(i)));
+            if (e && strcmp(e, "GL_EXT_buffer_storage") == 0) {
+                hasBufferStorage = true;
+                break;
+            }
+        }
+    }
+
+    // Enable persistent-coherent UBO mapping when available: the allocator then maps each
+    // page once instead of a glMapBufferRange/glUnmapBuffer round trip per UBO write.
+    if (hasBufferStorage && uboAllocator) {
+        if (auto proc = getProcAddress("glBufferStorageEXT")) {
+            uboAllocator->setPersistentMapping(reinterpret_cast<void*>(proc));
+        }
+    }
+
     if (const auto* extensions = reinterpret_cast<const char*>(MBGL_CHECK_ERROR(glGetString(GL_EXTENSIONS)))) {
         auto fn = [&](std::initializer_list<std::pair<const char*, const char*>> probes) -> ProcAddress {
             for (auto probe : probes) {
