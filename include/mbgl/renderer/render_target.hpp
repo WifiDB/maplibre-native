@@ -115,16 +115,18 @@ protected:
         /// a tile loading, unloading, or being rebuilt from new bucket data all
         /// change it (a tile id alone would not catch a rebuild).
         std::size_t contentHash = 0;
-        /// Zoom is not in contentHash's drawable ids but draped UBOs carry
-        /// zoom-derived values (line ratio, interpolation factors)
+        /// Integer tile-zoom (draped UBOs carry zoom-derived values like line ratio);
+        /// stored quantized so a pinch within one zoom level does not invalidate the
+        /// cache. See computeDrapeCoverage.
         double zoom = -1;
-        /// Evaluated-property generation; see LayerTweaker::getPropertiesEpoch
+        /// Evaluated-property generation. Retained for reference but intentionally NOT
+        /// part of sameContentAs: the drape cache must not re-render on paint changes
+        /// (matches maplibre-gl-js). See computeDrapeCoverage.
         uint64_t propertiesEpoch = 0;
 
         /// Whether this would draw exactly what `other` already did
         bool sameContentAs(const DrapeCoverage& other) const {
-            return totalGroups == other.totalGroups && contentHash == other.contentHash && zoom == other.zoom &&
-                   propertiesEpoch == other.propertiesEpoch;
+            return totalGroups == other.totalGroups && contentHash == other.contentHash && zoom == other.zoom;
         }
         /// Whether this would draw less than `other`: fewer layers with content, or
         /// the same layers via coarser ancestor fallbacks
@@ -151,6 +153,19 @@ protected:
     // fewer layers / coarser fallbacks than it already shows (anti-flicker);
     // see RenderTarget::render.
     DrapeCoverage bakedCoverage;
+    // Opt-in "render once" for immutable targets (hillshade prepare, whose DEM input is
+    // baked into the prepare drawable once). When set, the target renders on its first
+    // frame and is skipped after (the offscreen texture persists). NOT set for the terrain
+    // depth target, which must re-render whenever the camera moves. Enabled via
+    // setRenderOnce() by RenderHillshadeLayer when it creates a prepare target.
+    bool renderOnce = false;
+    // Whether a render-once target has already produced its texture.
+    bool renderedOnce = false;
+
+public:
+    void setRenderOnce(bool value) { renderOnce = value; }
+
+protected:
     // This target's own content signature (PaintParameters::perTargetDrapeSignature)
     // as of the last frame it evaluated its coverage: a signature of just the
     // drawables overlapping this target, plus zoom and the property epoch. While it

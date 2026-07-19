@@ -257,6 +257,9 @@ void RenderHillshadeLayer::update(gfx::ShaderRegistry& shaders,
             if (!renderTarget) {
                 continue;
             }
+            // The prepare target's DEM input is baked in below (setImage) and never
+            // changes, so it only needs to render once; skip it on later frames.
+            renderTarget->setRenderOnce(true);
             bucket.renderTarget = renderTarget;
             bucket.renderTargetPrepared = true;
             addRenderTarget(renderTarget, changes);
