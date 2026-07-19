@@ -994,8 +994,21 @@ void RenderOrchestrator::updateLayers(gfx::ShaderRegistry& shaders,
     std::vector<std::unique_ptr<ChangeRequest>> changes;
     changes.reserve(items.size() * 3);
 
+    // Dirty-gate: skip re-updating fill/line layers whose tile content (tile set + source
+    // buckets) is unchanged. update() only does drawable bookkeeping/geometry; the paint
+    // (color/opacity, incl. transitions) is applied by the separate tweaker pass every
+    // frame, so gating update() does not freeze colors. Tile load/reload is caught by
+    // hasUnchangedTileContent (new bucket -> not gated). This removes the per-frame
+    // O(drawables) work for the bulk of a heavy vector style during pan/pitch. Opt-in per
+    // type: only fill/line (never symbols/placement). (Transitions are intentionally NOT a
+    // gate: they are dominated by symbol fades, which fill/line do not participate in.)
     for (const auto& item : items) {
         auto& renderLayer = item.layer.get();
+
+        if (renderLayer.supportsUpdateGating() && renderLayer.hasUnchangedTileContent()) {
+            continue;
+        }
+
 #if MLN_RENDER_BACKEND_OPENGL
         // Android Emulator: Goldfish is *very* broken. This will prevent a crash
         // inside the GL translation layer at the cost of emulator performance.
