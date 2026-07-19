@@ -65,3 +65,4 @@ out.png
 # Local profiling artifacts (perfetto traces, gfxinfo dumps, profiling scripts)
 profiles/
 tools/
+perf.data
