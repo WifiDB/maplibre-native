@@ -46,7 +46,7 @@ std::vector<gfx::UniqueDrawable> TileLayerGroup::removeDrawables(mbgl::RenderPas
         });
     drawablesByTile.erase(range.first, range.second);
     std::ranges::for_each(result, [&](const auto& item) {
-        const auto hit = sortedDrawables.find(item.get());
+        const auto hit = std::find(sortedDrawables.begin(), sortedDrawables.end(), item.get());
         assert(hit != sortedDrawables.end());
         if (hit != sortedDrawables.end()) {
             sortedDrawables.erase(hit);
@@ -59,8 +59,11 @@ void TileLayerGroup::addDrawable(mbgl::RenderPass pass, const OverscaledTileID& 
     assert(drawablesByTile.size() == sortedDrawables.size());
     if (drawable) {
         LayerGroupBase::addDrawable(drawable);
-        [[maybe_unused]] const auto result = sortedDrawables.insert(drawable.get());
-        assert(result.second);
+        auto* const raw = drawable.get();
+        const auto pos = std::lower_bound(
+            sortedDrawables.begin(), sortedDrawables.end(), raw, gfx::DrawableLessByPriority{});
+        assert(pos == sortedDrawables.end() || *pos != raw);
+        sortedDrawables.insert(pos, raw);
         drawablesByTile.insert(
             std::make_pair(TileLayerGroupTileKey{.renderPass = pass, .tileID = id}, std::move(drawable)));
     }
