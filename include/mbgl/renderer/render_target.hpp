@@ -98,8 +98,17 @@ public:
     /// Upload the layer groups
     void upload(gfx::UploadPass& uploadPass);
 
-    /// Render the layer groups
-    void render(RenderOrchestrator&, const RenderTree&, PaintParameters&);
+    /// Outcome of a render() call, used by the drape render budget.
+    enum class RenderResult {
+        Skipped,  ///< Nothing to do (cache hit / render-once already baked).
+        Rendered, ///< The target was (re-)rendered this frame (consumes drape budget).
+        Deferred, ///< A re-render was needed but skipped for budget; keeps the stale texture.
+    };
+
+    /// Render the layer groups. When `canRerender` is false, a drape target that would
+    /// re-render but already has a baked texture is deferred (returns Deferred) instead,
+    /// so a burst of dirty drape targets is spread across frames rather than stalling one.
+    RenderResult render(RenderOrchestrator&, const RenderTree&, PaintParameters&, bool canRerender = true);
 
 protected:
     void renderDrapedLayerGroups(RenderOrchestrator&, PaintParameters&);
@@ -161,6 +170,10 @@ protected:
     bool renderOnce = false;
     // Whether a render-once target has already produced its texture.
     bool renderedOnce = false;
+    // Whether this drape target has been rendered at least once, so its offscreen texture
+    // holds valid (if stale) content. Only such targets may be deferred by the drape budget;
+    // a never-rendered target is always rendered to avoid showing a blank tile.
+    bool hasRenderedContent = false;
 
 public:
     void setRenderOnce(bool value) { renderOnce = value; }

@@ -260,7 +260,10 @@ void RenderTarget::renderDrapedLayerGroups(RenderOrchestrator& orchestrator, Pai
     }
 }
 
-void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& renderTree, PaintParameters& parameters) {
+RenderTarget::RenderResult RenderTarget::render(RenderOrchestrator& orchestrator,
+                                                const RenderTree& renderTree,
+                                                PaintParameters& parameters,
+                                                bool canRerender) {
     // Render-once targets are hillshade prepare targets (opt-in via setRenderOnce): the DEM
     // texture is baked into the prepare drawable once (RenderHillshadeLayer::update calls
     // setImage), so the DEM->hillshade output is immutable. Render once and keep the
@@ -270,7 +273,7 @@ void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& re
     // target that re-renders on camera movement), hence the explicit opt-in flag rather
     // than keying on !drapeTileID. Matches gl-js prepare-to-FBO reuse.
     if (renderOnce && renderedOnce) {
-        return;
+        return RenderResult::Skipped;
     }
     if (drapeTileID) {
         // Fast path: the per-target coverage scan below is O(draped drawables) and
@@ -290,7 +293,7 @@ void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& re
             }
         }
         if (bakedSignature && *bakedSignature == targetSignature) {
-            return;
+            return RenderResult::Skipped;
         }
 
         // Fast path missed: we pay the full O(draped drawables) scan. Count it so
@@ -307,7 +310,7 @@ void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& re
         // behaviour (render a terrain tile's texture only when its stack changes).
         if (coverage.sameContentAs(bakedCoverage)) {
             bakedSignature = targetSignature;
-            return;
+            return RenderResult::Skipped;
         }
 
         // Otherwise the content did change. Keep what is already baked when the new
@@ -324,8 +327,19 @@ void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& re
             // the scan too. A real change (drawable set, zoom, properties) moves the
             // signature and re-opens evaluation, preserving the anti-flicker intent.
             bakedSignature = targetSignature;
-            return;
+            return RenderResult::Skipped;
         }
+
+        // Drape render budget: this target needs a re-render, but if the per-frame cap is
+        // exhausted (canRerender == false) and it already has a baked texture, defer to a
+        // later frame - keep showing the slightly stale texture instead of stalling the
+        // frame. Leave bakedCoverage/bakedSignature unchanged so it is re-evaluated and
+        // rendered on a subsequent frame. A never-rendered target falls through (rendering
+        // it now avoids a blank tile), so bursts of *new* targets are not deferred.
+        if (!canRerender && hasRenderedContent) {
+            return RenderResult::Deferred;
+        }
+
         // TEMP diagnostic: reaching here means every skip missed. Report WHY - whether
         // the signature gate missed and which coverage field changed - straight to
         // logcat via the NDK, so it is guaranteed visible in release. Throttled.
@@ -448,7 +462,11 @@ void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& re
         renderedOnce = true;
     }
 
+    // This target now holds valid content, so it may be deferred by the drape budget later.
+    hasRenderedContent = true;
+
     parameters.scissorRect = prevScissorRect;
+    return RenderResult::Rendered;
 }
 
 } // namespace mbgl

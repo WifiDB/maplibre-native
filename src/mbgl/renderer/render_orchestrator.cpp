@@ -994,6 +994,12 @@ void RenderOrchestrator::updateLayers(gfx::ShaderRegistry& shaders,
     std::vector<std::unique_ptr<ChangeRequest>> changes;
     changes.reserve(items.size() * 3);
 
+    // Progressive tile build: cap how many new tiles construct their drawables this frame so
+    // a burst of newly revealed tiles (tilt/pan) is spread over frames instead of stalling
+    // one. Layers consume from this budget before building a new tile (fill/line for now).
+    constexpr int kNewTileBuildBudgetPerFrame = 8;
+    context.resetNewTileBuildBudget(kNewTileBuildBudgetPerFrame);
+
     // Dirty-gate: skip re-updating fill/line layers whose tile content (tile set + source
     // buckets) is unchanged. update() only does drawable bookkeeping/geometry; the paint
     // (color/opacity, incl. transitions) is applied by the separate tweaker pass every
