@@ -1011,9 +1011,12 @@ void RenderOrchestrator::updateLayers(gfx::ShaderRegistry& shaders,
     for (const auto& item : items) {
         auto& renderLayer = item.layer.get();
 
-        if (renderLayer.supportsUpdateGating() && renderLayer.hasUnchangedTileContent()) {
-            continue;
-        }
+        // NOTE: the fill/line dirty-gate (skip update() when hasUnchangedTileContent) was
+        // removed - it leaked GL memory. update() also runs the stale-drawable cleanup
+        // (removeDrawablesIf for tiles that left the cover); gating skipped that cleanup on
+        // stable frames after a tile departed, so departed tiles' drawables (and their
+        // VBO/IBO/textures) were never freed -> unbounded GL growth -> OOM. Re-add the gate
+        // only once the stale-drawable cleanup runs independently of update().
 
 #if MLN_RENDER_BACKEND_OPENGL
         // Android Emulator: Goldfish is *very* broken. This will prevent a crash
