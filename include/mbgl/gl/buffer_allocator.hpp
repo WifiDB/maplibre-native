@@ -168,6 +168,12 @@ public:
     size_t pageSize() const noexcept override;
     int32_t getBufferID(size_t bufferIndex) const noexcept override;
 
+    /// Enable persistent buffer mapping (EXT_buffer_storage). Pages are then created with
+    /// immutable persistent-coherent storage and mapped once, so per-write map/unmap round
+    /// trips are eliminated. `bufferStorageProc` is the loaded glBufferStorageEXT pointer;
+    /// passing nullptr (or never calling this) keeps the glMapBufferRange map/unmap path.
+    void setPersistentMapping(void* bufferStorageProc) noexcept;
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl;
