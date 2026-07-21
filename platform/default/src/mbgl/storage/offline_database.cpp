@@ -305,6 +305,34 @@ std::pair<bool, uint64_t> OfflineDatabase::put(const Resource& resource, const R
     return {false, 0};
 }
 
+namespace {
+
+// Detect payloads that are already compressed so we don't waste CPU re-running zlib over
+// them (it does not shrink them - measured ratio ~100% - but the deflate pass is expensive).
+// Covers the formats served as tiles/resources: gzip/zlib (util::is_compressed) plus the
+// image containers (WebP, PNG, JPEG). Notably the raster-DEM tiles are WebP, which dominate
+// the cache-write CPU. Compressible payloads (MVT protobuf, JSON, glyphs) are left alone.
+bool isAlreadyCompressed(const std::string& d) {
+    if (util::is_compressed(d)) {
+        return true; // gzip / zlib
+    }
+    const auto n = d.size();
+    const auto* p = reinterpret_cast<const uint8_t*>(d.data());
+    if (n >= 12 && p[0] == 'R' && p[1] == 'I' && p[2] == 'F' && p[3] == 'F' && p[8] == 'W' && p[9] == 'E' &&
+        p[10] == 'B' && p[11] == 'P') {
+        return true; // WebP (RIFF....WEBP)
+    }
+    if (n >= 4 && p[0] == 0x89 && p[1] == 0x50 && p[2] == 0x4e && p[3] == 0x47) {
+        return true; // PNG
+    }
+    if (n >= 3 && p[0] == 0xff && p[1] == 0xd8 && p[2] == 0xff) {
+        return true; // JPEG
+    }
+    return false;
+}
+
+} // namespace
+
 std::pair<bool, uint64_t> OfflineDatabase::putInternal(const Resource& resource,
                                                        const Response& response,
                                                        bool evict_) {
@@ -319,8 +347,15 @@ std::pair<bool, uint64_t> OfflineDatabase::putInternal(const Resource& resource,
     uint64_t size = 0;
 
     if (response.data) {
-        compressedData = util::compress(*response.data);
-        compressed = compressedData.size() < response.data->size();
+        // Skip compression for payloads that are already compressed (WebP/PNG/JPEG raster tiles,
+        // gzip/zlib bodies): zlib cannot shrink them but the deflate pass is a large CPU cost on
+        // the DatabaseFileSource thread during tile streaming. Compressible payloads (MVT
+        // protobuf, style/source JSON, glyphs) still get compressed as before.
+        const bool skipCompress = isAlreadyCompressed(*response.data);
+        if (!skipCompress) {
+            compressedData = util::compress(*response.data);
+            compressed = compressedData.size() < response.data->size();
+        }
         size = compressed ? compressedData.size() : response.data->size();
     }
 
