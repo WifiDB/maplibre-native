@@ -103,7 +103,13 @@ RenderTarget::DrapeCoverage RenderTarget::computeDrapeCoverage(RenderOrchestrato
                                                                const PaintParameters& parameters) const {
     DrapeCoverage coverage;
     coverage.totalGroups = 0;
-    coverage.zoom = parameters.state.getZoom();
+    // Fold only the INTEGER tile-zoom into the signature, not the continuous zoom: a drape's
+    // rasterized tile-space content is stable within one zoom level, so keying on the fractional
+    // zoom would invalidate every target on every frame of a pinch and re-render all drapes.
+    // Re-render only when crossing an integer zoom boundary (where the tile set changes anyway),
+    // as maplibre-gl-js does. Trade-off: zoom-derived draped values (e.g. line width) freeze
+    // within a level until the boundary is crossed - imperceptible and matching gl-js.
+    coverage.zoom = std::floor(parameters.state.getZoom());
     coverage.propertiesEpoch = LayerTweaker::getPropertiesEpoch();
     orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) {
         if (layerGroup.getType() != LayerGroupBase::Type::TileLayerGroup || !layerGroup.shouldRenderToTerrain()) {

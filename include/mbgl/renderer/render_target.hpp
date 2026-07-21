@@ -115,8 +115,9 @@ protected:
         /// a tile loading, unloading, or being rebuilt from new bucket data all
         /// change it (a tile id alone would not catch a rebuild).
         std::size_t contentHash = 0;
-        /// Zoom is not in contentHash's drawable ids but draped UBOs carry
-        /// zoom-derived values (line ratio, interpolation factors)
+        /// Integer tile-zoom (floored): not in contentHash's drawable ids, but draped UBOs
+        /// carry zoom-derived values. Keyed on the integer level (not continuous zoom) so a
+        /// pinch within one level reuses the baked texture; see computeDrapeCoverage.
         double zoom = -1;
         /// Evaluated-property generation; see LayerTweaker::getPropertiesEpoch
         uint64_t propertiesEpoch = 0;
