@@ -6,6 +6,12 @@
 #include <mbgl/util/exception.hpp>
 #include <mbgl/util/logging.hpp>
 #include <mbgl/util/traits.hpp>
+
+#if defined(__ANDROID__)
+#include <sys/system_properties.h> // TEMP: runtime toggle for distance tile-LOD
+#include <android/log.h>
+#include <numbers>
+#endif
 #include <mbgl/util/action_journal.hpp>
 #include <mbgl/util/action_journal_impl.hpp>
 #include <mbgl/gfx/rendering_stats.hpp>
@@ -145,6 +151,24 @@ void Map::Impl::onUpdate() {
                                .tileLodPitchThreshold = tileLodPitchThreshold,
                                .tileLodZoomShift = tileLodZoomShift,
                                .tileLodMode = tileLodMode};
+
+#if defined(__ANDROID__)
+    // TEMP: runtime toggle for distance-based tile LOD. `adb shell setprop debug.mln.terrain_lod 1`
+    // (then restart the app) enables it and drops the pitch threshold so it engages at the terrain
+    // view's 60 deg tilt. Logs once whether it is on, so we can confirm the mechanism is active.
+    {
+        static const bool lodOn = [] {
+            char v[PROP_VALUE_MAX] = {0};
+            const bool on = __system_property_get("debug.mln.terrain_lod", v) > 0 && v[0] == '1';
+            __android_log_print(ANDROID_LOG_ERROR, "LODMODE", "distance-LOD %s", on ? "ON" : "OFF");
+            return on;
+        }();
+        if (lodOn) {
+            params.tileLodMode = TileLodMode::Distance;
+            params.tileLodPitchThreshold = (10.0 / 180.0) * std::numbers::pi;
+        }
+    }
+#endif
 
     rendererFrontend.update(std::make_shared<UpdateParameters>(std::move(params)));
 }

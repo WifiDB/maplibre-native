@@ -247,11 +247,13 @@ std::unique_ptr<RenderTree> RenderOrchestrator::createRenderTree(
     //
     // The DEM tiles read here are the previous frame's, as in gl-js: the cover only has
     // to be conservative, and a DEM that is still loading converges on the next frame.
-    const bool terrainEnabled = renderTerrain && renderTerrain->isEnabled();
-    const DEMElevationProvider elevationProvider{
-        terrainEnabled ? getRenderSource(renderTerrain->getSourceID()) : nullptr,
-        terrainEnabled ? renderTerrain->getExaggeration() : 1.0};
-    tileParameters.elevationProvider = terrainEnabled ? &elevationProvider : nullptr;
+    // pr-4389 tile_cover behaviour: compute the DEM source cover against the FLAT ground
+    // plane, not the terrain relief. Our elevation-aware cover (TileElevationProvider) requests
+    // the extra near-field tiles a tilted view of raised terrain exposes - correct, but ~3x the
+    // mesh tiles (measured), which is the dominant terrain cost. Forcing flat cover here matches
+    // pr-4389 (which has no elevationProvider at all) - fewer tiles, at the cost of some
+    // near-field relief being under-covered. Flip back to the provider to restore elevation cover.
+    tileParameters.elevationProvider = nullptr;
 
     const ImageDifference imageDiff = diffImages(imageImpls, updateParameters->images);
     imageImpls = updateParameters->images;
@@ -1014,6 +1016,12 @@ void RenderOrchestrator::updateLayers(gfx::ShaderRegistry& shaders,
 
     std::vector<std::unique_ptr<ChangeRequest>> changes;
     changes.reserve(items.size() * 3);
+
+    // Progressive tile build: cap how many new tiles construct their drawables this frame so
+    // a burst of newly revealed tiles (tilt/pan) is spread over frames instead of stalling
+    // one. Layers consume from this budget before building a new tile (fill/line for now).
+    constexpr int kNewTileBuildBudgetPerFrame = 8;
+    context.resetNewTileBuildBudget(kNewTileBuildBudgetPerFrame);
 
     for (const auto& item : items) {
         auto& renderLayer = item.layer.get();

@@ -19,6 +19,20 @@
 
 namespace mbgl {
 
+// TEMP Stage-2 diagnostic: per-frame count of drape targets (re-)rendered vs skipped (cache
+// hit). If `rendered` stays high while panning, the drape cache is not holding - the suspected
+// ~4x overdraw source. Fetched and reset once per frame by the renderer.
+namespace {
+uint32_t gDrapeRendered = 0;
+uint32_t gDrapeSkipped = 0;
+} // namespace
+void fetchDrapeStats(uint32_t& rendered, uint32_t& skipped) {
+    rendered = gDrapeRendered;
+    skipped = gDrapeSkipped;
+    gDrapeRendered = 0;
+    gDrapeSkipped = 0;
+}
+
 RenderTarget::RenderTarget(gfx::Context& context_,
                            const Size size,
                            const gfx::TextureChannelDataType type,
@@ -110,7 +124,8 @@ RenderTarget::DrapeCoverage RenderTarget::computeDrapeCoverage(RenderOrchestrato
     // as maplibre-gl-js does. Trade-off: zoom-derived draped values (e.g. line width) freeze
     // within a level until the boundary is crossed - imperceptible and matching gl-js.
     coverage.zoom = std::floor(parameters.state.getZoom());
-    coverage.propertiesEpoch = LayerTweaker::getPropertiesEpoch();
+    // NOTE: the paint-property epoch is deliberately NOT tracked (see DrapeCoverage::sameContentAs):
+    // it bumps every frame on any paint transition and defeats the drape cache while panning.
     orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) {
         if (layerGroup.getType() != LayerGroupBase::Type::TileLayerGroup || !layerGroup.shouldRenderToTerrain()) {
             return;
@@ -132,9 +147,19 @@ RenderTarget::DrapeCoverage RenderTarget::computeDrapeCoverage(RenderOrchestrato
             } else {
                 return; // no overlap: contributes nothing to this target
             }
-            // Identify the content by drawable id, so a tile loading, unloading
-            // or being rebuilt all change the signature
-            util::hash_combine(coverage.contentHash, drawable.getID().id());
+            // Identify content by the COVERING TILE id, NOT the drawable-instance id: a
+            // tile's drawables are rebuilt with fresh ids on every bucket update and fade
+            // transition, so a drawable-id hash churned every frame during interaction and
+            // re-rendered the drape needlessly (measured: drapes re-rendered every frame while
+            // panning -> ~4x overdraw). The drape only needs re-rendering when the SET of
+            // covering tiles changes (load/unload/integer-zoom). Summed so visitDrawables
+            // order does not matter. Matches maplibre-gl-js (RTT cache keyed on tile coverage).
+            std::size_t tileHash = 0;
+            util::hash_combine(tileHash, unwrapped.wrap);
+            util::hash_combine(tileHash, unwrapped.canonical.z);
+            util::hash_combine(tileHash, unwrapped.canonical.x);
+            util::hash_combine(tileHash, unwrapped.canonical.y);
+            coverage.contentHash += tileHash;
         });
         if (haveExactOrDescendant || bestAncestor) {
             coverage.groupsWithContent++;
@@ -229,8 +254,28 @@ void RenderTarget::renderDrapedLayerGroups(RenderOrchestrator& orchestrator, Pai
     }
 }
 
-void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& renderTree, PaintParameters& parameters) {
+RenderTarget::RenderResult RenderTarget::render(RenderOrchestrator& orchestrator,
+                                                const RenderTree& renderTree,
+                                                PaintParameters& parameters,
+                                                bool canRerender) {
     if (drapeTileID) {
+        // O(1) fast-path: this target's content signature was computed once for the whole
+        // frame in Renderer::Impl::render (perTargetDrapeSignature). If it matches what we
+        // last baked, the covering tiles / integer zoom are unchanged - skip immediately,
+        // without the O(draped drawables) computeDrapeCoverage scan below. This is the
+        // dominant saving while panning, where most targets' content is stable.
+        std::size_t targetSignature = parameters.drapedContentSignature;
+        if (parameters.perTargetDrapeSignature) {
+            const auto it = parameters.perTargetDrapeSignature->find(*drapeTileID);
+            if (it != parameters.perTargetDrapeSignature->end()) {
+                targetSignature = it->second;
+            }
+        }
+        if (bakedSignature && *bakedSignature == targetSignature) {
+            ++gDrapeSkipped;
+            return RenderResult::Skipped;
+        }
+
         const DrapeCoverage coverage = computeDrapeCoverage(orchestrator, parameters);
 
         // Render cache: a drape is rendered with a tile-local orthographic matrix,
@@ -241,23 +286,41 @@ void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& re
         // since panning changes none of them, and it is the maplibre-gl-js
         // behaviour (render a terrain tile's texture only when its stack changes).
         if (coverage.sameContentAs(bakedCoverage)) {
-            return;
+            bakedSignature = targetSignature;
+            ++gDrapeSkipped;
+            return RenderResult::Skipped;
         }
 
         // Otherwise the content did change. Keep what is already baked when the new
         // content would be strictly worse (fewer draped layers with content, or
         // coarser ancestor fallbacks): while browsing, a tile's content briefly
         // drops out of the render set (eviction, reload) and re-rendering would
-        // flash the drape empty before it recovers. A change in evaluated
-        // properties is exempt and always re-renders, because it is authoritative:
-        // a style edit that removes a draped layer is legitimately "worse" and must
-        // not be held back forever. Otherwise the target's lifetime bounds
+        // flash the drape empty before it recovers. The target's lifetime bounds
         // staleness: when its terrain tile leaves the cover it is destroyed.
-        const bool propertiesChanged = coverage.propertiesEpoch != bakedCoverage.propertiesEpoch;
-        if (!propertiesChanged && coverage.worseThan(bakedCoverage)) {
-            return;
+        if (coverage.worseThan(bakedCoverage)) {
+            // Hold the current (better) texture. Record the signature so future identical
+            // frames O(1)-skip; if the content later recovers, its covering tiles change,
+            // the signature changes, and this re-opens for re-evaluation.
+            bakedSignature = targetSignature;
+            ++gDrapeSkipped;
+            return RenderResult::Skipped;
+        }
+
+        // Drape render budget: this target needs a re-render, but if the per-frame cap is
+        // exhausted (canRerender == false) and it already has a baked texture, defer to a
+        // later frame - keep showing the slightly stale texture instead of stalling the
+        // frame. Leave bakedCoverage unchanged so it is re-evaluated and rendered on a
+        // subsequent frame. A never-rendered target falls through (rendering it now avoids
+        // a blank tile), so bursts of *new* targets are not deferred.
+        if (!canRerender && hasRenderedContent) {
+            // Leave bakedCoverage/bakedSignature unchanged so this re-evaluates and renders
+            // on a later frame once the budget allows.
+            ++gDrapeSkipped;
+            return RenderResult::Deferred;
         }
         bakedCoverage = coverage;
+        bakedSignature = targetSignature;
+        ++gDrapeRendered;
     }
 
     // Drape targets carry a depth and stencil attachment, as maplibre-gl-js's
@@ -350,7 +413,11 @@ void RenderTarget::render(RenderOrchestrator& orchestrator, const RenderTree& re
     parameters.renderPass.reset();
     parameters.encoder->present(*offscreenTexture);
 
+    // This target now holds valid content, so it may be deferred by the drape budget later.
+    hasRenderedContent = true;
+
     parameters.scissorRect = prevScissorRect;
+    return RenderResult::Rendered;
 }
 
 } // namespace mbgl

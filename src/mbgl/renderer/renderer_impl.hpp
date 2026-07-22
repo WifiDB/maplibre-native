@@ -11,8 +11,13 @@
 
 #include <memory>
 #include <string>
+#include <cstdint>
 
 namespace mbgl {
+
+// TEMP perf test: drape render-target size, toggled via `debug.mln.drape_size` (e.g. 256 to
+// quarter the per-tile drape fragment cost; default 512). Read once at Renderer::Impl ctor.
+std::uint32_t drapeTargetSizeFromEnv();
 
 class RendererObserver;
 class RenderStaticData;
@@ -54,7 +59,7 @@ private:
     /// textures they sample. Rebuilding the pool per frame would reallocate every
     /// tile-sized target every frame - churning GPU memory and discarding the
     /// baked content that suppresses drape flicker.
-    TexturePool texturePool{512}; // TODO: tile size
+    TexturePool texturePool{drapeTargetSizeFromEnv()}; // TODO: tile size (512; TEMP env-toggled)
 
     gfx::RendererBackend& backend;
 

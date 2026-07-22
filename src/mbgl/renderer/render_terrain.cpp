@@ -2,6 +2,12 @@
 #include <mbgl/renderer/update_parameters.hpp>
 #include <mbgl/renderer/render_source.hpp>
 #include <mbgl/renderer/render_tile.hpp>
+
+#if defined(__ANDROID__)
+#include <android/log.h>            // TEMP: LODTILES terrain tile-count diagnostic
+#include <sys/system_properties.h> // TEMP: terrain_opaque / mesh_size perf toggles
+#include <cstdlib>
+#endif
 #include <mbgl/renderer/render_pass.hpp>
 #include <mbgl/renderer/render_tree.hpp>
 #include <mbgl/renderer/render_static_data.hpp>
@@ -31,6 +37,8 @@
 #include <mbgl/shaders/shader_defines.hpp>
 #include <mbgl/shaders/segment.hpp>
 #include <mbgl/util/constants.hpp>
+#include <mbgl/util/geo.hpp>       // TEMP: LatLng for terrainMaxMeshTiles() distance cap
+#include <mbgl/math/angles.hpp>    // TEMP: util::deg2rad for terrainMaxMeshTiles() distance cap
 #include <mbgl/util/logging.hpp>
 #include <mbgl/util/image.hpp>
 #include <mbgl/util/mat4.hpp>
@@ -44,6 +52,100 @@
 namespace mbgl {
 
 namespace {
+
+// TEMP perf test: render the terrain surface in the Opaque pass (near->far) instead of
+// Translucent (far->near) when `debug.mln.terrain_opaque 1`. On PowerVR (TBDR) opaque geometry
+// goes through Hidden Surface Removal, which culls the ~4x horizon overdraw before shading;
+// the translucent pass bypasses HSR (measured HSR efficiency 0%). Read once per process.
+bool terrainSurfaceOpaque() {
+    static const bool opaque = [] {
+#if defined(__ANDROID__)
+        char v[PROP_VALUE_MAX] = {0};
+        const bool on = __system_property_get("debug.mln.terrain_opaque", v) > 0 && v[0] == '1';
+        __android_log_print(ANDROID_LOG_ERROR, "TERRAINPASS", "surface = %s", on ? "OPAQUE" : "TRANSLUCENT");
+        return on;
+#else
+        return false;
+#endif
+    }();
+    return opaque;
+}
+
+// TEMP perf test: terrain mesh grid density per tile from `debug.mln.mesh_size` (16/32/64/128,
+// default 128). The mesh is 128x128 by default -> ~1.4M triangles/frame at pitch (color + depth
+// passes x ~20 tiles); lowering it cuts vertex/tiler load. Read once; the mesh is cached.
+std::size_t terrainMeshGridSize() {
+    static const std::size_t grid = [] {
+        std::size_t g = 128;
+#if defined(__ANDROID__)
+        char v[PROP_VALUE_MAX] = {0};
+        if (__system_property_get("debug.mln.mesh_size", v) > 0) {
+            const int x = std::atoi(v);
+            if (x == 16 || x == 32 || x == 64 || x == 128) g = static_cast<std::size_t>(x);
+        }
+        __android_log_print(ANDROID_LOG_ERROR, "MESHSIZE", "terrain grid = %zu", g);
+#endif
+        return g;
+    }();
+    return grid;
+}
+
+// TEMP perf test: the depth pass only needs the terrain silhouette for symbol occlusion, not
+// the color surface's detail, so it can use a much coarser mesh - halving the per-frame terrain
+// geometry (the depth pass is a full extra mesh render). `debug.mln.depth_mesh_size` (default 32).
+std::size_t terrainDepthMeshGridSize() {
+    static const std::size_t grid = [] {
+        std::size_t g = 128; // default: full res - coarser breaks symbol occlusion
+#if defined(__ANDROID__)
+        char v[PROP_VALUE_MAX] = {0};
+        if (__system_property_get("debug.mln.depth_mesh_size", v) > 0) {
+            const int x = std::atoi(v);
+            if (x == 8 || x == 16 || x == 32 || x == 64 || x == 128) g = static_cast<std::size_t>(x);
+        }
+        __android_log_print(ANDROID_LOG_ERROR, "MESHSIZE", "depth grid = %zu", g);
+#endif
+        return g;
+    }();
+    return grid;
+}
+
+// TEMP diagnostic: skip the terrain mesh skirts (edge curtains) via `debug.mln.skip_skirts 1`
+// to isolate their overdraw contribution (leaves cracks between tiles; measurement only).
+bool terrainSkipSkirts() {
+    static const bool skip = [] {
+#if defined(__ANDROID__)
+        char v[PROP_VALUE_MAX] = {0};
+        const bool s = __system_property_get("debug.mln.skip_skirts", v) > 0 && v[0] == '1';
+        __android_log_print(ANDROID_LOG_ERROR, "SKIRTS", "skirts = %s", s ? "OFF" : "ON");
+        return s;
+#else
+        return false;
+#endif
+    }();
+    return skip;
+}
+
+// TEMP perf test: cap the terrain mesh tile count via `debug.mln.max_mesh_tiles` (default 24,
+// 0 = unlimited). frustumCull keeps every on-screen tile; under high tilt that pulls the whole
+// far horizon in - dozens of tiles projecting into a thin band, each overdrawing it (RenderDoc:
+// this is the ~4x surface overdraw). Keeping only the N tiles nearest the map center drops the
+// far horizon (matches pr-4389 MAX_MESH_TILES=24). Everything downstream - drape targets,
+// re-renders, depth draws - scales with this count.
+std::size_t terrainMaxMeshTiles() {
+    static const std::size_t cap = [] {
+        std::size_t n = 24;
+#if defined(__ANDROID__)
+        char v[PROP_VALUE_MAX] = {0};
+        if (__system_property_get("debug.mln.max_mesh_tiles", v) > 0) {
+            const int x = std::atoi(v);
+            if (x >= 0 && x <= 256) n = static_cast<std::size_t>(x);
+        }
+        __android_log_print(ANDROID_LOG_ERROR, "MESHCAP", "max mesh tiles = %zu", n);
+#endif
+        return n;
+    }();
+    return cap;
+}
 
 // Scale and x/y offset mapping a child tile's local space into the (possibly
 // ancestor) DEM tile that covers it: a child dz levels deeper occupies the
@@ -197,6 +299,51 @@ void RenderTerrain::update(RenderOrchestrator& orchestrator,
         const util::TileCoverParameters cullParams{.transformState = state, .elevationProvider = &elevationProvider};
         meshTiles = util::frustumCull(cullParams, meshTiles);
     }
+
+    // Cap the mesh tile count: keep those nearest the map center, drop the farthest (the horizon
+    // tiles a high tilt pulls in - the ~4x surface overdraw source, RenderDoc-confirmed). Ported
+    // from pr-4389; see terrainMaxMeshTiles(). Applied after frustumCull so off-screen tiles are
+    // already gone and the cap only trims far on-screen horizon tiles.
+    if (const std::size_t maxMeshTiles = terrainMaxMeshTiles(); maxMeshTiles > 0 && meshTiles.size() > maxMeshTiles) {
+        // Map center in normalized web-mercator [0,1] (standard projection)
+        const LatLng center = state.getLatLng();
+        const double cx = center.longitude() / 360.0 + 0.5;
+        const double latRad = util::deg2rad(center.latitude());
+        const double cy = 0.5 - std::log(std::tan(M_PI / 4.0 + latRad / 2.0)) / (2.0 * M_PI);
+
+        const auto tileDist2 = [&](const UnwrappedTileID& id) {
+            const double scale = static_cast<double>(1u << id.canonical.z);
+            const double tx = (static_cast<double>(id.canonical.x) + 0.5) / scale + id.wrap;
+            const double ty = (static_cast<double>(id.canonical.y) + 0.5) / scale;
+            const double dx = tx - cx;
+            const double dy = ty - cy;
+            return dx * dx + dy * dy;
+        };
+
+        std::vector<UnwrappedTileID> sorted(meshTiles.begin(), meshTiles.end());
+        std::partial_sort(sorted.begin(),
+                          sorted.begin() + static_cast<std::ptrdiff_t>(maxMeshTiles),
+                          sorted.end(),
+                          [&](const UnwrappedTileID& a, const UnwrappedTileID& b) {
+                              return tileDist2(a) < tileDist2(b);
+                          });
+        meshTiles = std::set<UnwrappedTileID>(sorted.begin(),
+                                              sorted.begin() + static_cast<std::ptrdiff_t>(maxMeshTiles));
+    }
+
+#if defined(__ANDROID__)
+    // TEMP: direct LOD signal - terrain tile counts. Distance LOD lowers the zoom of far tiles,
+    // so srcTiles/meshTiles drop at the same tilted view. Stable per terrain update (not gesture
+    // or frame-throttle dependent like the drape-target count).
+    if (demUpdateCounter % 20 == 1) {
+        __android_log_print(ANDROID_LOG_ERROR,
+                            "LODTILES",
+                            "srcTiles=%zu meshTiles=%zu demTex=%zu",
+                            renderTileIDs.size(),
+                            meshTiles.size(),
+                            demTextures.size());
+    }
+#endif
 
     // Drop drawables and cached DEM textures for tiles that left the mesh tile
     // set, keeping everything else intact between frames
@@ -524,18 +671,26 @@ bool RenderTerrain::isEnabled() const {
 
 const RenderTerrain::TerrainMesh& RenderTerrain::getMesh(gfx::Context& context) {
     if (!mesh) {
-        generateMesh(context);
+        mesh = buildMesh(context, terrainMeshGridSize());
     }
     return *mesh;
 }
 
-void RenderTerrain::generateMesh(gfx::Context& /*context*/) {
+const RenderTerrain::TerrainMesh& RenderTerrain::getDepthMesh(gfx::Context& context) {
+    if (!depthMesh) {
+        depthMesh = buildMesh(context, terrainDepthMeshGridSize());
+    }
+    return *depthMesh;
+}
+
+RenderTerrain::TerrainMesh RenderTerrain::buildMesh(gfx::Context& /*context*/, std::size_t gridSizeArg) {
     // A regular grid mesh (reused for every tile, displaced by the DEM in the
     // vertex shader) plus a skirt: each tile edge is duplicated into a curtain
     // that the shader drops by u_ele_delta, hiding the cracks between neighbouring
     // tiles at different zoom levels. Ported from maplibre-gl-js Terrain
     // getTerrainMesh()/_buildSkirts().
-    const size_t gridSize = MESH_SIZE;
+    const size_t gridSize = gridSizeArg; // TEMP: was MESH_SIZE (env-toggled per mesh)
+    const bool skipSkirts = terrainSkipSkirts(); // TEMP: skirt-overdraw isolation
     const size_t vps = gridSize + 1; // vertices per side
     const float step = static_cast<float>(util::EXTENT) / static_cast<float>(gridSize);
 
@@ -585,7 +740,7 @@ void RenderTerrain::generateMesh(gfx::Context& /*context*/) {
     for (size_t x = 0; x < vps; ++x) {
         addVert(x * step, extent, 1);
     }
-    for (uint16_t x = 0; x < gridSize; ++x) {
+    for (uint16_t x = 0; !skipSkirts && x < gridSize; ++x) {
         indices.insert(indices.end(),
                        {static_cast<uint16_t>(offsetBottomEdge + x),
                         static_cast<uint16_t>(offsetBottom + x),
@@ -611,7 +766,7 @@ void RenderTerrain::generateMesh(gfx::Context& /*context*/) {
             }
         }
     }
-    for (uint16_t y = 0; y < gridSize * 2; y += 2) {
+    for (uint16_t y = 0; !skipSkirts && y < gridSize * 2; y += 2) {
         indices.insert(indices.end(),
                        {static_cast<uint16_t>(offsetLeft + y),
                         static_cast<uint16_t>(offsetLeft + y + 1),
@@ -627,7 +782,7 @@ void RenderTerrain::generateMesh(gfx::Context& /*context*/) {
                         static_cast<uint16_t>(offsetRight + y + 3)});
     }
 
-    mesh = TerrainMesh{nullptr, // vertexBuffer - created when building the drawable
+    return TerrainMesh{nullptr, // vertexBuffer - created when building the drawable
                        nullptr, // indexBuffer - created when building the drawable
                        vertices.size() / 4,
                        indices.size(),
@@ -670,8 +825,9 @@ std::unique_ptr<gfx::Drawable> RenderTerrain::createDrawableForTile(gfx::Context
                                                                     std::shared_ptr<gfx::Texture2D> demTexture,
                                                                     std::shared_ptr<gfx::Texture2D> mapTexture,
                                                                     bool depthPass) {
-    // Ensure mesh is generated
-    const auto& terrainMesh = getMesh(context);
+    // Ensure mesh is generated. The depth pass (symbol-occlusion silhouette) uses a coarser
+    // mesh than the color surface - it needs the shape, not the detail - halving terrain geometry.
+    const auto& terrainMesh = depthPass ? getDepthMesh(context) : getMesh(context);
 
     if (terrainMesh.vertices.empty() || terrainMesh.indices.empty()) {
         Log::Error(Event::Render, "Terrain mesh is empty, cannot create drawable");
@@ -698,8 +854,10 @@ std::unique_ptr<gfx::Drawable> RenderTerrain::createDrawableForTile(gfx::Context
 
     // The drape pass uses the Translucent render pass because it renders in
     // forward order (high index = front), unlike Opaque which renders reversed.
+    // TEMP: the color surface can instead render in the Opaque pass (near->far) so PowerVR's
+    // HSR culls the horizon overdraw; the depth pass keeps its dedicated path.
     builder->setShader(terrainShader);
-    builder->setRenderPass(RenderPass::Translucent);
+    builder->setRenderPass((!depthPass && terrainSurfaceOpaque()) ? RenderPass::Opaque : RenderPass::Translucent);
     if (depthPass) {
         // The depth pass renders packed depth with real depth testing so the
         // nearest surface wins, into the terrain depth target (renderDepth)

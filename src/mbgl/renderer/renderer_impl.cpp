@@ -26,6 +26,8 @@
 #include <mbgl/renderer/layer_tweaker.hpp>
 #include <mbgl/renderer/render_target.hpp>
 #include <mbgl/renderer/render_terrain.hpp>
+#include <mbgl/renderer/layer_group.hpp> // per-target drape signature: TileLayerGroup::visitDrawables
+#include <mbgl/util/hash.hpp>            // per-target drape signature: hash_combine
 #include <mbgl/renderer/dem_elevation_provider.hpp>
 #include <mbgl/renderer/layers/terrain_layer_tweaker.hpp>
 #include <mbgl/util/tile_cover.hpp>
@@ -44,7 +46,32 @@ constexpr auto CaptureFrameCount = 1;
 #include <mbgl/gl/drawable_gl.hpp>
 #endif // !MLN_RENDER_BACKEND_METAL
 
+#if defined(__ANDROID__)
+#include <android/log.h>            // TEMP: LODCNT draws + drape-target count diagnostic
+#include <sys/system_properties.h> // TEMP: drape_size perf toggle
+#include <cstdlib>
+#endif
+
 namespace mbgl {
+
+void fetchDrapeStats(uint32_t&, uint32_t&); // TEMP Stage-2: defined in render_target.cpp
+
+// TEMP perf test: drape render-target size from `debug.mln.drape_size` (128/256/512/1024),
+// default 512. Lowering it quarters the per-tile drape fragment + memory cost.
+std::uint32_t drapeTargetSizeFromEnv() {
+    std::uint32_t size = 512;
+#if defined(__ANDROID__)
+    char v[PROP_VALUE_MAX] = {0};
+    if (__system_property_get("debug.mln.drape_size", v) > 0) {
+        const int n = std::atoi(v);
+        if (n == 128 || n == 256 || n == 512 || n == 1024) {
+            size = static_cast<std::uint32_t>(n);
+        }
+    }
+    __android_log_print(ANDROID_LOG_ERROR, "DRAPESIZE", "drape target = %u", size);
+#endif
+    return size;
+}
 
 using namespace style;
 
@@ -189,6 +216,10 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
     staticData->has3D = renderTreeParameters.has3D;
     staticData->backendSize = backend.getDefaultRenderable().getSize();
 
+    // Set when the drape render budget defers a target this frame, so a follow-up frame is
+    // requested (via needsRepaint) to let the deferred targets catch up progressively.
+    bool drapeWorkDeferred = false;
+
     if (renderState == RenderState::Never) {
         observer->onWillStartRenderingMap();
     }
@@ -310,6 +341,71 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
     // placeholder would otherwise never be replaced and occlusion never engage).
     if (auto* terrain = orchestrator.getRenderTerrain()) {
         terrain->prepareDepthTarget(parameters);
+    }
+
+    // Per-drape-target content signatures for this frame (PaintParameters::perTargetDrapeSignature).
+    // Computed once here in a single O(draped drawables) pass so each drape target's render() can
+    // short-circuit in O(1), instead of re-scanning every draped drawable per target per frame
+    // (the old computeDrapeCoverage cost). Must outlive drawableTargetsPass() below, hence
+    // function scope; parameters points into it for the rest of the frame.
+    std::map<UnwrappedTileID, std::size_t> perTargetDrapeSignature;
+    if (orchestrator.getRenderTerrain()) {
+        // Fold only the INTEGER tile-zoom (a drape's rasterized content is stable within a zoom
+        // level); the paint epoch is deliberately excluded - see RenderTarget::computeDrapeCoverage.
+        const int32_t zoomLevel = static_cast<int32_t>(parameters.state.getZoom());
+
+        // Single pass over all draped drawables: record each covering-tile hash in a flat vector
+        // and fold it into the frame-global signature. A target's own signature is then a linear
+        // sum over that vector of the hashes whose tile overlaps it - no per-target rescans.
+        std::size_t signature = 0;
+        std::size_t drapedGroupCount = 0;
+        std::vector<std::pair<UnwrappedTileID, std::size_t>> drapedTiles;
+        drapedTiles.reserve(1024);
+        orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) {
+            if (layerGroup.getType() != LayerGroupBase::Type::TileLayerGroup ||
+                !layerGroup.shouldRenderToTerrain()) {
+                return;
+            }
+            drapedGroupCount++;
+            static_cast<TileLayerGroup&>(layerGroup).visitDrawables([&](const gfx::Drawable& drawable) {
+                if (!drawable.getEnabled() || !drawable.getTileID()) {
+                    return;
+                }
+                // Key on the COVERING TILE id, not the drawable-instance id (rebuilt with fresh
+                // ids on every bucket update/fade). Consistent with computeDrapeCoverage.
+                const UnwrappedTileID tile = drawable.getTileID()->toUnwrapped();
+                std::size_t h = 0;
+                util::hash_combine(h, tile.wrap);
+                util::hash_combine(h, tile.canonical.z);
+                util::hash_combine(h, tile.canonical.x);
+                util::hash_combine(h, tile.canonical.y);
+                util::hash_combine(signature, h);
+                drapedTiles.emplace_back(tile, h);
+            });
+        });
+        util::hash_combine(signature, drapedGroupCount);
+        util::hash_combine(signature, zoomLevel);
+        parameters.drapedContentSignature = signature;
+
+        // Each drape target's signature: order-independent sum of the hashes of all draped
+        // drawables overlapping it (own tile, descendants, ancestors), folded with the group
+        // count and integer zoom - the same inputs computeDrapeCoverage hashes per target.
+        orchestrator.visitRenderTargets([&](RenderTarget& renderTarget) {
+            const auto& tid = renderTarget.getDrapeTileID();
+            if (!tid) {
+                return;
+            }
+            std::size_t sig = 0;
+            for (const auto& [tile, h] : drapedTiles) {
+                if (tile == *tid || tile.isChildOf(*tid) || tid->isChildOf(tile)) {
+                    sig += h;
+                }
+            }
+            util::hash_combine(sig, drapedGroupCount);
+            util::hash_combine(sig, zoomLevel);
+            perTargetDrapeSignature[*tid] = sig;
+        });
+        parameters.perTargetDrapeSignature = &perTargetDrapeSignature;
     }
 
     // Draped layer groups are not routed into individual render targets here;
@@ -457,9 +553,22 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
                 renderTarget.render(orchestrator, renderTree, parameters);
             }
         });
+        // Drape render budget: cap how many drape targets actually re-render per frame. A
+        // burst of dirty targets (tilt/pan changing coverage) otherwise stalls one frame for
+        // tens of ms each; instead render up to kMaxDrapeRerendersPerFrame and defer the rest
+        // (they keep their stale texture), requesting a follow-up frame so they catch up
+        // progressively. Never-rendered targets always render (avoid blank tiles).
+        constexpr int kMaxDrapeRerendersPerFrame = 4;
+        int drapeBudget = kMaxDrapeRerendersPerFrame;
         orchestrator.visitRenderTargets([&](RenderTarget& renderTarget) {
             if (renderTarget.getDrapeTileID()) {
-                renderTarget.render(orchestrator, renderTree, parameters);
+                const auto res = renderTarget.render(
+                    orchestrator, renderTree, parameters, /*canRerender=*/drapeBudget > 0);
+                if (res == RenderTarget::RenderResult::Rendered) {
+                    --drapeBudget;
+                } else if (res == RenderTarget::RenderResult::Deferred) {
+                    drapeWorkDeferred = true;
+                }
             }
         });
     };
@@ -558,7 +667,19 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
     }
     drawableTargetsPass();
     // Terrain depth pass for symbol occlusion (sampled by calculate_visibility)
-    if (auto* terrain = orchestrator.getRenderTerrain()) {
+    // TEMP diagnostic: `adb shell setprop debug.mln.skip_depth 1` skips it to isolate its
+    // overdraw contribution (breaks symbol occlusion; measurement only).
+    bool skipDepth = false;
+#if defined(__ANDROID__)
+    {
+        static const bool s = [] {
+            char v[PROP_VALUE_MAX] = {0};
+            return __system_property_get("debug.mln.skip_depth", v) > 0 && v[0] == '1';
+        }();
+        skipDepth = s;
+    }
+#endif
+    if (auto* terrain = orchestrator.getRenderTerrain(); terrain && !skipDepth) {
         terrain->renderDepth(orchestrator, renderTree, parameters);
     }
     commonClearPass();
@@ -597,9 +718,37 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
 
     context.renderingStats().encodingTime = renderTree.getElapsedTime() - context.renderingStats().renderingTime;
 
+#if defined(__ANDROID__)
+    // TEMP: LOD signal - draws this frame + number of terrain drape targets (one per terrain
+    // tile). Distance LOD should drop the drape-target count (fewer distant tiles) at the same
+    // tilted view, independent of gesture; draws should fall with it. Throttled.
+    {
+        // Fetch every frame (resets) so the logged value is this frame's count, not a sum.
+        uint32_t drapeRendered = 0, drapeSkipped = 0;
+        fetchDrapeStats(drapeRendered, drapeSkipped);
+        static uint32_t lodThrottle = 0;
+        if (++lodThrottle % 30 == 1) {
+            uint32_t drapeTargets = 0;
+            orchestrator.visitRenderTargets([&](RenderTarget& rt) {
+                if (rt.getDrapeTileID()) ++drapeTargets;
+            });
+            __android_log_print(ANDROID_LOG_ERROR,
+                                "LODCNT",
+                                "draws=%d drapeTargets=%u drapeRendered=%u drapeSkipped=%u",
+                                context.renderingStats().numDrawCalls,
+                                drapeTargets,
+                                drapeRendered,
+                                drapeSkipped);
+        }
+    }
+#endif
+
     observer->onDidFinishRenderingFrame(
         renderTreeParameters.loaded ? RendererObserver::RenderMode::Full : RendererObserver::RenderMode::Partial,
-        renderTreeParameters.needsRepaint,
+        // Request a follow-up frame if the drape budget deferred any target or the tile-build
+        // budget deferred any new tile, so deferred drapes/tiles catch up progressively even
+        // after the interaction stops.
+        renderTreeParameters.needsRepaint || drapeWorkDeferred || context.newTileBuildWasDeferred(),
         renderTreeParameters.placementChanged,
         context.threadSafeCopyRenderingStats());
 

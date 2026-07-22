@@ -69,6 +69,11 @@ android {
             "\"MapLibre Android/${project.extra["versionName"]}\""
         )
         consumerProguardFiles("proguard-rules.pro")
+
+        // Build for arm64 only (faster local builds); applies to every flavor and build type.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     flavorDimensions += "renderer"

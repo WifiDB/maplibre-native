@@ -188,6 +188,7 @@ public:
     };
 
     const TerrainMesh& getMesh(gfx::Context& context);
+    const TerrainMesh& getDepthMesh(gfx::Context& context);
 
     /**
      * @brief Get the layer group for terrain drawables
@@ -233,7 +234,7 @@ private:
      * Creates a regular grid mesh (default 128x128) with border frames
      * to prevent stitching artifacts between tiles.
      */
-    void generateMesh(gfx::Context& context);
+    TerrainMesh buildMesh(gfx::Context& context, std::size_t gridSize);
 
     /**
      * @brief Activate or deactivate the layer group
@@ -242,6 +243,7 @@ private:
 
     // Terrain mesh (shared across all tiles)
     std::optional<TerrainMesh> mesh;
+    std::optional<TerrainMesh> depthMesh; // coarser mesh for the depth (symbol-occlusion) pass
 
     // Layer group for terrain drawables
     LayerGroupBasePtr layerGroup;
