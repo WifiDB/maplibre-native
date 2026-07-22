@@ -1,6 +1,7 @@
 #include <mbgl/renderer/render_layer.hpp>
 
 #include <mbgl/gfx/context.hpp>
+#include <mbgl/renderer/bucket.hpp>
 #include <mbgl/renderer/paint_parameters.hpp>
 #include <mbgl/renderer/render_source.hpp>
 #include <mbgl/renderer/render_tile.hpp>
@@ -185,6 +186,32 @@ bool RenderLayer::setRenderTileBucketID(const OverscaledTileID& tileID, util::Si
         return true;
     }
     return false;
+}
+
+bool RenderLayer::hasUnchangedTileContent() const {
+    // renderTileIDs holds (tileID -> bucketID) from the last time drawables were built.
+    // If the current cover has the same tiles built from the same buckets, the existing
+    // drawables are still correct and update() can be skipped. Conservative: any tile
+    // added, removed, or rebuilt from a new bucket returns false.
+    if (!renderTiles) {
+        return renderTileIDs.empty();
+    }
+    if (renderTiles->size() != renderTileIDs.size()) {
+        return false;
+    }
+    for (const RenderTile& tile : *renderTiles) {
+        const auto& tileID = tile.getOverscaledTileID();
+        const auto existing = renderTileIDs.find(tileID);
+        if (!existing.has_value()) {
+            return false;
+        }
+        const Bucket* bucket = tile.getBucket(*baseImpl);
+        const util::SimpleIdentity bucketID = bucket ? bucket->getID() : util::SimpleIdentity::Empty;
+        if (bucketID != existing->get()) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void RenderLayer::layerIndexChanged(int32_t newLayerIndex, UniqueChangeRequestVec& changes) {

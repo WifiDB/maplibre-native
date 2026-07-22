@@ -100,7 +100,7 @@ public:
 
     /// Outcome of a render() call, used by the drape render budget.
     enum class RenderResult {
-        Skipped,  ///< Nothing to do (cache hit).
+        Skipped,  ///< Nothing to do (cache hit / render-once already baked).
         Rendered, ///< The target was (re-)rendered this frame (consumes drape budget).
         Deferred, ///< A re-render was needed but skipped for budget; keeps the stale texture.
     };
@@ -126,10 +126,14 @@ protected:
         /// ids: those are rebuilt with fresh ids every frame during fades/bucket updates, which
         /// churned the signature and re-rendered every drape each frame while panning.
         std::size_t contentHash = 0;
-        /// Integer tile-zoom (floored): not in contentHash's tile ids, but draped UBOs
-        /// carry zoom-derived values. Keyed on the integer level (not continuous zoom) so a
-        /// pinch within one level reuses the baked texture; see computeDrapeCoverage.
+        /// Integer tile-zoom (draped UBOs carry zoom-derived values like line ratio);
+        /// stored quantized so a pinch within one zoom level does not invalidate the
+        /// cache. See computeDrapeCoverage.
         double zoom = -1;
+        /// Evaluated-property generation. Retained for reference but intentionally NOT
+        /// part of sameContentAs: the drape cache must not re-render on paint changes
+        /// (matches maplibre-gl-js). See computeDrapeCoverage.
+        uint64_t propertiesEpoch = 0;
 
         /// Whether this would draw exactly what `other` already did.
         /// The paint-property epoch is deliberately NOT part of this: any paint transition
@@ -165,15 +169,31 @@ protected:
     // fewer layers / coarser fallbacks than it already shows (anti-flicker);
     // see RenderTarget::render.
     DrapeCoverage bakedCoverage;
-    // This target's own content signature (PaintParameters::perTargetDrapeSignature) as of the
-    // last frame it evaluated its coverage. When the signature is unchanged, the covering tiles
-    // and zoom are identical, so render() short-circuits in O(1) without the per-target
-    // computeDrapeCoverage scan. std::nullopt until the first evaluation.
-    std::optional<std::size_t> bakedSignature;
+    // Opt-in "render once" for immutable targets (hillshade prepare, whose DEM input is
+    // baked into the prepare drawable once). When set, the target renders on its first
+    // frame and is skipped after (the offscreen texture persists). NOT set for the terrain
+    // depth target, which must re-render whenever the camera moves. Enabled via
+    // setRenderOnce() by RenderHillshadeLayer when it creates a prepare target.
+    bool renderOnce = false;
+    // Whether a render-once target has already produced its texture.
+    bool renderedOnce = false;
     // Whether this drape target has been rendered at least once, so its offscreen texture
     // holds valid (if stale) content. Only such targets may be deferred by the drape budget;
     // a never-rendered target is always rendered to avoid showing a blank tile.
     bool hasRenderedContent = false;
+
+public:
+    void setRenderOnce(bool value) { renderOnce = value; }
+
+protected:
+    // This target's own content signature (PaintParameters::perTargetDrapeSignature)
+    // as of the last frame it evaluated its coverage: a signature of just the
+    // drawables overlapping this target, plus zoom and the property epoch. While it
+    // is unchanged, nothing this target draws has changed, so its baked texture is
+    // still correct and the O(draped drawables) coverage scan is skipped. Being
+    // per-target (not global), an unrelated tile loading elsewhere no longer forces
+    // this target to re-scan. Unset until the target has been evaluated once.
+    std::optional<std::size_t> bakedSignature;
 };
 
 } // namespace mbgl

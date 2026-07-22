@@ -53,6 +53,11 @@ void RenderingStats::Update(jni::JNIEnv& env,
     SetField(memUniformBuffers, jni::jint);
     SetField(stencilClears, jni::jint);
     SetField(stencilUpdates, jni::jint);
+    SetField(numDrapeTargetsRendered, jni::jint);
+    SetField(numDrapeCoverageScans, jni::jint);
+    SetField(terrainUpdateTime, jni::jdouble);
+    SetField(terrainTweakerTime, jni::jdouble);
+    SetField(terrainDepthTime, jni::jdouble);
 
 #undef SetField
 }

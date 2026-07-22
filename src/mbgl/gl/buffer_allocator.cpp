@@ -16,9 +16,9 @@ namespace gl {
 // gl2ext, so these are declared locally; the function pointer is loaded at context init
 // via eglGetProcAddress and handed to the allocator through setPersistentMapping().
 using PFNGLBUFFERSTORAGEEXT = void (*)(GLenum target, GLsizeiptr size, const void* data, GLbitfield flags);
-constexpr GLbitfield kMapWriteBit = 0x0002;         // GL_MAP_WRITE_BIT
-constexpr GLbitfield kMapPersistentBitEXT = 0x0040; // GL_MAP_PERSISTENT_BIT_EXT
-constexpr GLbitfield kMapCoherentBitEXT = 0x0080;   // GL_MAP_COHERENT_BIT_EXT
+constexpr GLbitfield kMapWriteBit = 0x0002;             // GL_MAP_WRITE_BIT
+constexpr GLbitfield kMapPersistentBitEXT = 0x0040;     // GL_MAP_PERSISTENT_BIT_EXT
+constexpr GLbitfield kMapCoherentBitEXT = 0x0080;       // GL_MAP_COHERENT_BIT_EXT
 constexpr GLbitfield kPersistentFlags = kMapWriteBit | kMapPersistentBitEXT | kMapCoherentBitEXT;
 
 /// @brief BufferAllocator is a semi-generic allocation strategy for uniform buffer objects.
