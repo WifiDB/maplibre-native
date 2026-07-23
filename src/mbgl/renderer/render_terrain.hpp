@@ -329,6 +329,22 @@ private:
     uint32_t demArrayNextLayer = 0;                    // next never-used slot
     void packDEMArrayLayer(gfx::Context&, const UnwrappedTileID&, const DEMData&);
     void freeDEMArrayLayer(const UnwrappedTileID&);
+
+    // Instanced depth pass: one draw covers every mesh tile, sampling each tile's DEM from
+    // its demTextureArray layer (see terrain_depth.vertex / TerrainDepthInstanceUBO). Rebuilt
+    // when the tile set changes; the per-instance transform matrix is refreshed every frame in
+    // updateInstancedDepthUBO (renderDepth), since it depends on the camera.
+    static constexpr uint32_t maxDepthInstances = 64; // must match TERRAIN_MAX_INSTANCES in shader
+    struct DepthInstance {
+        OverscaledTileID tileID;
+        std::array<float, 4> demCoords; // scale, x/y offset, dem_dim (.w)
+        float demLayer;                 // demTextureArray layer for this tile (own or ancestor)
+    };
+    std::vector<DepthInstance> depthInstances; // current tile set, index == a_instance / gl_InstanceID
+    std::size_t depthInstanceSignature = 0;    // hash of the tile set the instanced drawable was built for
+    gfx::UniformBufferPtr depthInstanceUBO;    // TerrainDepthInstanceUBO[N], refreshed per frame
+    void rebuildInstancedDepthDrawable(gfx::Context&, gfx::ShaderRegistry&);
+    void updateInstancedDepthUBO(PaintParameters&);
 #endif
 
     // See getPlaceholderDEMTexture
