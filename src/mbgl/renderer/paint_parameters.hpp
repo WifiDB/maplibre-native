@@ -183,13 +183,6 @@ public:
     float symbolFadeChange;
     const uint64_t frameCount;
 
-    // Frame-global draped-content signature + per-drape-target signatures, computed once per
-    // frame in Renderer::Impl::render (see RenderTarget::render). They let each drape target
-    // decide in O(1) whether its content changed, instead of re-scanning all draped drawables
-    // per target per frame (the old computeDrapeCoverage cost, ~O(targets * drawables)).
-    std::size_t drapedContentSignature = 0;
-    const std::map<UnwrappedTileID, std::size_t>* perTargetDrapeSignature = nullptr;
-
     static constexpr int numSublayers = 3;
 #if MLN_RENDER_BACKEND_OPENGL
     static constexpr float depthEpsilon = 1.0f / (1 << 16);

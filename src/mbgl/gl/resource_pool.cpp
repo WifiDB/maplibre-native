@@ -3,6 +3,10 @@
 #include <cassert>
 #include <type_traits>
 
+#ifdef __ANDROID__
+#include <android/log.h> // __android_log_assert (OOM dump persists in tombstone)
+#endif
+
 #include <mbgl/gl/context.hpp>
 #include <mbgl/gl/defines.hpp>
 #include <mbgl/gl/enum.hpp>

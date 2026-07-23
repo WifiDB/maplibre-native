@@ -81,6 +81,8 @@ class TerrainVectorMapActivity :
 
         mapView.getMapAsync { map ->
             maplibreMap = map
+            // Let the tilt gesture reach the full supported pitch over 3D terrain
+            map.setMaxPitchPreference(MapLibreConstants.MAXIMUM_PITCH_LIMIT.toDouble())
             map.setOnFpsChangedListener { fps -> lastFps = fps }
             map.cameraPosition = CameraPosition.Builder()
                 .target(LatLng(47.26475, 11.40416)) // Innsbruck

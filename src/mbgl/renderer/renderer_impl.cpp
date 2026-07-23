@@ -57,6 +57,7 @@ constexpr auto CaptureFrameCount = 1;
 // TEMP: direct NDK logcat for the per-frame drape hit-ratio diagnostic. Remove with it.
 #if defined(__ANDROID__)
 #include <android/log.h>
+#include <sys/system_properties.h> // PROP_VALUE_MAX / __system_property_get for debug.mln toggles
 #endif
 
 namespace mbgl {

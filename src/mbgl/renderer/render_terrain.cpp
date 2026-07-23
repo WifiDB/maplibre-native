@@ -64,24 +64,6 @@ namespace mbgl {
 
 namespace {
 
-// TEMP perf test: render the terrain surface in the Opaque pass (near->far) instead of
-// Translucent (far->near) when `debug.mln.terrain_opaque 1`. On PowerVR (TBDR) opaque geometry
-// goes through Hidden Surface Removal, which culls the ~4x horizon overdraw before shading;
-// the translucent pass bypasses HSR (measured HSR efficiency 0%). Read once per process.
-bool terrainSurfaceOpaque() {
-    static const bool opaque = [] {
-#if defined(__ANDROID__)
-        char v[PROP_VALUE_MAX] = {0};
-        const bool on = __system_property_get("debug.mln.terrain_opaque", v) > 0 && v[0] == '1';
-        __android_log_print(ANDROID_LOG_ERROR, "TERRAINPASS", "surface = %s", on ? "OPAQUE" : "TRANSLUCENT");
-        return on;
-#else
-        return false;
-#endif
-    }();
-    return opaque;
-}
-
 // TEMP perf test: terrain mesh grid density per tile from `debug.mln.mesh_size` (16/32/64/128,
 // default 128). The mesh is 128x128 by default -> ~1.4M triangles/frame at pitch (color + depth
 // passes x ~20 tiles); lowering it cuts vertex/tiler load. Read once; the mesh is cached.
@@ -134,28 +116,6 @@ bool terrainSkipSkirts() {
 #endif
     }();
     return skip;
-}
-
-// TEMP perf test: cap the terrain mesh tile count via `debug.mln.max_mesh_tiles` (default 24,
-// 0 = unlimited). frustumCull keeps every on-screen tile; under high tilt that pulls the whole
-// far horizon in - dozens of tiles projecting into a thin band, each overdrawing it (RenderDoc:
-// this is the ~4x surface overdraw). Keeping only the N tiles nearest the map center drops the
-// far horizon (matches pr-4389 MAX_MESH_TILES=24). Everything downstream - drape targets,
-// re-renders, depth draws - scales with this count.
-std::size_t terrainMaxMeshTiles() {
-    static const std::size_t cap = [] {
-        std::size_t n = 24;
-#if defined(__ANDROID__)
-        char v[PROP_VALUE_MAX] = {0};
-        if (__system_property_get("debug.mln.max_mesh_tiles", v) > 0) {
-            const int x = std::atoi(v);
-            if (x >= 0 && x <= 256) n = static_cast<std::size_t>(x);
-        }
-        __android_log_print(ANDROID_LOG_ERROR, "MESHCAP", "max mesh tiles = %zu", n);
-#endif
-        return n;
-    }();
-    return cap;
 }
 
 // Scale and x/y offset mapping a child tile's local space into the (possibly
@@ -671,15 +631,8 @@ void RenderTerrain::prepareDepthTarget(PaintParameters& parameters) {
     if (depthLayerGroup) {
         depthRenderTarget->addLayerGroup(depthLayerGroup, /*replace=*/true);
     }
-
-    // Render the packed depth every frame, matching upstream. It was previously gated on
-    // camera-projection changes to save a mesh pass on static scenes, but that gate did not
-    // invalidate on DEM/terrain-shape changes: while DEM tiles stream in during warmup, the
-    // terrain surface (and the symbol anchors displaced onto it) shift, but the frozen depth
-    // texture did not, so symbol occlusion (calculate_visibility) went out of sync and labels
-    // that had appeared were wrongly culled ("appear at warmup, then vanish"). Drawing it
-    // every frame keeps the depth in lockstep with the terrain, as upstream does.
-    depthRenderTarget->render(orchestrator, renderTree, parameters);
+    // prepareDepthTarget only creates/attaches the target; the actual depth render happens in
+    // renderDepth (every frame, matching upstream, to keep depth in lockstep with the terrain).
 }
 
 const std::shared_ptr<gfx::Texture2D>& RenderTerrain::getDepthTexture(gfx::Context& context) {
@@ -972,6 +925,14 @@ void RenderTerrain::activateLayerGroup(bool activate, UniqueChangeRequestVec& ch
             changes.emplace_back(std::make_unique<RemoveLayerGroupRequest>(layerGroup));
         }
     }
+}
+
+void RenderTerrain::deactivate(UniqueChangeRequestVec& changes) {
+    // depthLayerGroup / depthRenderTarget are owned by this RenderTerrain and released with
+    // it; only the mesh layerGroup is registered separately with the orchestrator, so that is
+    // all we need to unregister here (see RenderOrchestrator::createRenderTree, which calls
+    // this before dropping RenderTerrain to avoid an orphaned floating terrain surface).
+    activateLayerGroup(false, changes);
 }
 
 #if MLN_RENDER_BACKEND_OPENGL
