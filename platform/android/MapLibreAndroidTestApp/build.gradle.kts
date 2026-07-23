@@ -32,11 +32,6 @@ android {
 
         manifestPlaceholders["SENTRY_DSN"] = ""
         manifestPlaceholders["SENTRY_ENV"] = ""
-
-        // Build for arm64 only (faster local builds); applies to every flavor and build type.
-        ndk {
-            abiFilters += "arm64-v8a"
-        }
     }
 
     nativeBuild(emptyList())
