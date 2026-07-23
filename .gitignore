@@ -61,3 +61,8 @@ out.png
 **/target/
 **/*.rs.bk
 **/*.profraw
+
+# Local profiling artifacts (perfetto traces, gfxinfo dumps, profiling scripts)
+profiles/
+tools/
+perf.data

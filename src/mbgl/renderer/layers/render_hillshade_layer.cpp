@@ -18,6 +18,8 @@
 #include <mbgl/renderer/render_target.hpp>
 #include <mbgl/renderer/update_parameters.hpp>
 #include <mbgl/shaders/shader_program_base.hpp>
+
+#include <unordered_set>
 #include <mbgl/shaders/hillshade_layer_ubo.hpp>
 #include <mbgl/gfx/drawable_builder.hpp>
 #include <mbgl/gfx/drawable_impl.hpp>
@@ -261,6 +263,9 @@ void RenderHillshadeLayer::update(gfx::ShaderRegistry& shaders,
             if (!renderTarget) {
                 continue;
             }
+            // The prepare target's DEM input is baked in below (setImage) and never
+            // changes, so it only needs to render once; skip it on later frames.
+            renderTarget->setRenderOnce(true);
             bucket.renderTarget = renderTarget;
             bucket.renderTargetPrepared = true;
 

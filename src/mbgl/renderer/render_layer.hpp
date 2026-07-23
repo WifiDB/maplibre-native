@@ -122,6 +122,19 @@ public:
     // Checks whether this layer can be rendered.
     bool needsRendering() const;
 
+    // Whether this layer type is safe to skip re-updating when its tile content is
+    // unchanged (see hasUnchangedTileContent). Opt-in per type; false by default so any
+    // layer that does per-frame work (e.g. symbol placement) is never gated. Enabled only
+    // for fill/line, whose per-frame update() is pure drawable bookkeeping when static.
+    virtual bool supportsUpdateGating() const noexcept { return false; }
+
+    // True when the current render-tile cover matches the tiles/buckets that drawables
+    // were last built from (renderTileIDs): same tile set, same source buckets. When true
+    // (and there are no active transitions) a fill/line layer's update() can be skipped -
+    // its drawables are already correct; the separate tweaker pass still updates camera
+    // UBOs. Conservative: any mismatch (tile added/removed, bucket rebuilt) returns false.
+    bool hasUnchangedTileContent() const;
+
     // Checks whether the given zoom is inside this layer zoom range.
     bool supportsZoom(float zoom) const;
 

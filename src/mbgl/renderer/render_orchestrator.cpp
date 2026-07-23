@@ -1,5 +1,7 @@
 #include <mbgl/renderer/render_orchestrator.hpp>
 
+#include <mbgl/gfx/context.hpp>
+#include <mbgl/util/monotonic_timer.hpp>
 #include <mbgl/annotation/annotation_manager.hpp>
 #include <mbgl/layermanager/layer_manager.hpp>
 #include <mbgl/renderer/change_request.hpp>
@@ -247,11 +249,13 @@ std::unique_ptr<RenderTree> RenderOrchestrator::createRenderTree(
     //
     // The DEM tiles read here are the previous frame's, as in gl-js: the cover only has
     // to be conservative, and a DEM that is still loading converges on the next frame.
-    const bool terrainEnabled = renderTerrain && renderTerrain->isEnabled();
-    const DEMElevationProvider elevationProvider{
-        terrainEnabled ? getRenderSource(renderTerrain->getSourceID()) : nullptr,
-        terrainEnabled ? renderTerrain->getExaggeration() : 1.0};
-    tileParameters.elevationProvider = terrainEnabled ? &elevationProvider : nullptr;
+    // pr-4389 tile_cover behaviour: compute the DEM source cover against the FLAT ground
+    // plane, not the terrain relief. Our elevation-aware cover (TileElevationProvider) requests
+    // the extra near-field tiles a tilted view of raised terrain exposes - correct, but ~3x the
+    // mesh tiles (measured), which is the dominant terrain cost. Forcing flat cover here matches
+    // pr-4389 (which has no elevationProvider at all) - fewer tiles, at the cost of some
+    // near-field relief being under-covered. Flip back to the provider to restore elevation cover.
+    tileParameters.elevationProvider = nullptr;
 
     const ImageDifference imageDiff = diffImages(imageImpls, updateParameters->images);
     imageImpls = updateParameters->images;
@@ -1015,8 +1019,30 @@ void RenderOrchestrator::updateLayers(gfx::ShaderRegistry& shaders,
     std::vector<std::unique_ptr<ChangeRequest>> changes;
     changes.reserve(items.size() * 3);
 
+    // Progressive tile build: cap how many new tiles construct their drawables this frame so
+    // a burst of newly revealed tiles (tilt/pan) is spread over frames instead of stalling
+    // one. Layers consume from this budget before building a new tile (fill/line for now).
+    constexpr int kNewTileBuildBudgetPerFrame = 8;
+    context.resetNewTileBuildBudget(kNewTileBuildBudgetPerFrame);
+
+    // Dirty-gate: skip re-updating fill/line layers whose tile content (tile set + source
+    // buckets) is unchanged. update() only does drawable bookkeeping/geometry; the paint
+    // (color/opacity, incl. transitions) is applied by the separate tweaker pass every
+    // frame, so gating update() does not freeze colors. Tile load/reload is caught by
+    // hasUnchangedTileContent (new bucket -> not gated). This removes the per-frame
+    // O(drawables) work for the bulk of a heavy vector style during pan/pitch. Opt-in per
+    // type: only fill/line (never symbols/placement). (Transitions are intentionally NOT a
+    // gate: they are dominated by symbol fades, which fill/line do not participate in.)
     for (const auto& item : items) {
         auto& renderLayer = item.layer.get();
+
+        // NOTE: the fill/line dirty-gate (skip update() when hasUnchangedTileContent) was
+        // removed - it leaked GL memory. update() also runs the stale-drawable cleanup
+        // (removeDrawablesIf for tiles that left the cover); gating skipped that cleanup on
+        // stable frames after a tile departed, so departed tiles' drawables (and their
+        // VBO/IBO/textures) were never freed -> unbounded GL growth -> OOM. Re-add the gate
+        // only once the stale-drawable cleanup runs independently of update().
+
 #if MLN_RENDER_BACKEND_OPENGL
         // Android Emulator: Goldfish is *very* broken. This will prevent a crash
         // inside the GL translation layer at the cost of emulator performance.
@@ -1033,7 +1059,9 @@ void RenderOrchestrator::updateLayers(gfx::ShaderRegistry& shaders,
 
     // Update terrain if enabled
     if (renderTerrain && renderTerrain->isEnabled()) {
+        const double start = util::MonotonicTimer::now().count();
         renderTerrain->update(*this, shaders, context, texturePool, state, updateParameters, renderTree, changes);
+        context.renderingStats().terrainUpdateTime = util::MonotonicTimer::now().count() - start;
     }
 
     addChanges(changes);

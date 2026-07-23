@@ -3,6 +3,7 @@
 #include <mbgl/annotation/annotation_manager.hpp>
 #include <mbgl/gfx/backend_scope.hpp>
 #include <mbgl/gfx/dynamic_texture_atlas.hpp>
+#include <mbgl/gfx/context.hpp>
 #include <mbgl/gfx/renderer_backend.hpp>
 #include <mbgl/layermanager/layer_manager.hpp>
 #include <mbgl/renderer/renderer_impl.hpp>
@@ -35,6 +36,16 @@ void Renderer::setObserver(RendererObserver* observer) {
 void Renderer::render(const std::shared_ptr<UpdateParameters>& updateParameters) {
     MLN_TRACE_FUNC();
     assert(updateParameters);
+
+    // Reset per-frame terrain phase timers before the render tree (which runs the
+    // terrain update) and the draw pass (tweaker + depth) populate them.
+    {
+        auto& stats = impl->backend.getContext().renderingStats();
+        stats.terrainUpdateTime = 0.0;
+        stats.terrainTweakerTime = 0.0;
+        stats.terrainDepthTime = 0.0;
+    }
+
     const bool styleChanged = impl->styleLoaded && !updateParameters->styleLoaded;
     impl->styleLoaded = updateParameters->styleLoaded;
     if (!impl->dynamicTextureAtlas || styleChanged) {

@@ -9,10 +9,17 @@
 #include <Foundation/Foundation.hpp>
 #endif // MLN_RENDER_BACKEND_METAL
 
+#include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
+#include <cstdint>
 
 namespace mbgl {
+
+// TEMP perf test: drape render-target size, toggled via `debug.mln.drape_size` (e.g. 256 to
+// quarter the per-tile drape fragment cost; default 512). Read once at Renderer::Impl ctor.
+std::uint32_t drapeTargetSizeFromEnv();
 
 class RendererObserver;
 class RenderStaticData;
@@ -54,7 +61,14 @@ private:
     /// textures they sample. Rebuilding the pool per frame would reallocate every
     /// tile-sized target every frame - churning GPU memory and discarding the
     /// baked content that suppresses drape flicker.
-    TexturePool texturePool{512}; // TODO: tile size
+    TexturePool texturePool{drapeTargetSizeFromEnv()}; // TODO: tile size (512; TEMP env-toggled)
+
+    // Frame-global draped-content signature (see PaintParameters::drapedContentSignature)
+    // from the previous frame. When it is unchanged, the draped layer groups' tweakers
+    // are skipped: their per-drawable UBOs still describe the cached drape textures,
+    // which are camera-independent (rendered with a tile-local matrix), so recomputing
+    // them would be wasted work. std::nullopt until the first terrain frame.
+    std::optional<std::size_t> lastDrapedContentSignature;
 
     gfx::RendererBackend& backend;
 

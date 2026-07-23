@@ -22,13 +22,23 @@
 #include <mbgl/util/logging.hpp>
 #include <mbgl/util/instrumentation.hpp>
 
+#include <mbgl/gfx/drawable.hpp>
 #include <mbgl/gfx/drawable_tweaker.hpp>
+#include <mbgl/renderer/layer_group.hpp>
 #include <mbgl/renderer/layer_tweaker.hpp>
 #include <mbgl/renderer/render_target.hpp>
 #include <mbgl/renderer/render_terrain.hpp>
+#include <mbgl/renderer/layer_group.hpp> // per-target drape signature: TileLayerGroup::visitDrawables
+#include <mbgl/util/hash.hpp>            // per-target drape signature: hash_combine
 #include <mbgl/renderer/dem_elevation_provider.hpp>
 #include <mbgl/renderer/layers/terrain_layer_tweaker.hpp>
-#include <mbgl/util/tile_cover.hpp>
+#include <mbgl/util/hash.hpp>
+
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <utility>
+#include <vector>
 
 #if MLN_RENDER_BACKEND_METAL
 #include <mbgl/mtl/renderer_backend.hpp>
@@ -44,7 +54,32 @@ constexpr auto CaptureFrameCount = 1;
 #include <mbgl/gl/drawable_gl.hpp>
 #endif // !MLN_RENDER_BACKEND_METAL
 
+// TEMP: direct NDK logcat for the per-frame drape hit-ratio diagnostic. Remove with it.
+#if defined(__ANDROID__)
+#include <android/log.h>
+#include <sys/system_properties.h> // PROP_VALUE_MAX / __system_property_get for debug.mln toggles
+#endif
+
 namespace mbgl {
+
+void fetchDrapeStats(uint32_t&, uint32_t&); // TEMP Stage-2: defined in render_target.cpp
+
+// TEMP perf test: drape render-target size from `debug.mln.drape_size` (128/256/512/1024),
+// default 512. Lowering it quarters the per-tile drape fragment + memory cost.
+std::uint32_t drapeTargetSizeFromEnv() {
+    std::uint32_t size = 512;
+#if defined(__ANDROID__)
+    char v[PROP_VALUE_MAX] = {0};
+    if (__system_property_get("debug.mln.drape_size", v) > 0) {
+        const int n = std::atoi(v);
+        if (n == 128 || n == 256 || n == 512 || n == 1024) {
+            size = static_cast<std::uint32_t>(n);
+        }
+    }
+    __android_log_print(ANDROID_LOG_ERROR, "DRAPESIZE", "drape target = %u", size);
+#endif
+    return size;
+}
 
 using namespace style;
 
@@ -54,6 +89,34 @@ RendererObserver& nullObserver() {
     static RendererObserver observer;
     return observer;
 }
+
+#if defined(__ANDROID__)
+// TEMP diagnostic: time spent in getDefaultRenderable().wait() at frame start.
+double g_drapeWaitMs = 0.0;
+// Elapsed time from render-tree build start (map update) to render() entry - i.e. the
+// per-frame update cost (layers/tiles/placement) that happens BEFORE any rendering.
+double g_preRenderMs = 0.0;
+// Time spent computing the drape signatures (the terrainActive block).
+double g_sigMs = 0.0;
+// Time spent running ALL layer-group tweakers, and uploading all layer groups + targets.
+double g_allTweakMs = 0.0;
+double g_uploadMs = 0.0;
+// Time spent in the 3D pass (common3DPass + drawable3DPass).
+double g_pass3dMs = 0.0;
+// Upload-pass scope: destructor (GL flush of queued uploads) and total to scope end.
+double g_beforeScopeEnd = 0.0;
+double g_uploadDtorMs = 0.0;
+double g_afterUploadMs = 0.0;
+// Drape targets pass split: non-drape (hillshade prepare) render loop vs drape loop.
+double g_nonDrapeMs = 0.0;
+double g_drapeLoopMs = 0.0;
+// First upload pass (source/bucket buffer uploads) and updateLayers (drawable management).
+double g_upload1Ms = 0.0;
+double g_updateLayersMs = 0.0;
+// Back half: on-screen opaque and translucent passes.
+double g_opaqueMs = 0.0;
+double g_translucentMs = 0.0;
+#endif
 
 } // namespace
 
@@ -170,9 +233,24 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
     }
 #endif // MLN_RENDER_BACKEND_METAL
 
+#if defined(__ANDROID__)
+    // How long the map update (render-tree build) took before render() was entered.
+    g_preRenderMs = renderTree.getElapsedTime() * 1000.0;
+#endif
+
     // Blocks execution until the renderable is available.
+    // TEMP diagnostic: time this wait - if the frame CPU is small but this blocks, we are
+    // pacing on buffer/vsync (GPU or compositor holding buffers), not app compute.
+    const double tWaitStart = util::MonotonicTimer::now().count();
     backend.getDefaultRenderable().wait();
+#if defined(__ANDROID__)
+    g_drapeWaitMs = (util::MonotonicTimer::now().count() - tWaitStart) * 1000.0;
+#endif
     context.beginFrame();
+
+    // TEMP diagnostic: render()-body start, to split the body into "before the drape pass"
+    // (upload + signature + tweakers + 3D) vs "after" (depth + opaque + translucent).
+    const double tBodyStart = util::MonotonicTimer::now().count();
 
     if (!staticData) {
         staticData = std::make_unique<RenderStaticData>(std::make_unique<gfx::ShaderRegistry>());
@@ -188,6 +266,10 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
     const auto& renderTreeParameters = renderTree.getParameters();
     staticData->has3D = renderTreeParameters.has3D;
     staticData->backendSize = backend.getDefaultRenderable().getSize();
+
+    // Set when the drape render budget defers a target this frame, so a follow-up frame is
+    // requested (via needsRepaint) to let the deferred targets catch up progressively.
+    bool drapeWorkDeferred = false;
 
     if (renderState == RenderState::Never) {
         observer->onWillStartRenderingMap();
@@ -271,6 +353,7 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
 
     // - UPLOAD PASS -------------------------------------------------------------------------------
     // Uploads all required buffers and images before we do any actual rendering.
+    const double tUpload1Start = util::MonotonicTimer::now().count();
     {
         const auto uploadPass = parameters.encoder->createUploadPass("upload",
                                                                      parameters.backend.getDefaultRenderable());
@@ -289,9 +372,13 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
         renderTree.getLineAtlas().upload(*uploadPass);
         renderTree.getPatternAtlas().upload(*uploadPass);
     }
+#if defined(__ANDROID__)
+    g_upload1Ms = (util::MonotonicTimer::now().count() - tUpload1Start) * 1000.0;
+#endif
 
     // - LAYER GROUP UPDATE ------------------------------------------------------------------------
     // Updates all layer groups and process changes
+    const double tUpdateLayersStart = util::MonotonicTimer::now().count();
     if (staticData && staticData->shaders) {
         orchestrator.updateLayers(*staticData->shaders,
                                   context,
@@ -303,19 +390,19 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
 
     orchestrator.processChanges();
     orchestrator.addRenderTargets(texturePool);
-
-    // Create the terrain occlusion depth target before the upload phase, so the
-    // symbol tweaker binds the real depth texture for THIS frame instead of the
-    // far-plane placeholder (in single-frame renders like the render tests the
-    // placeholder would otherwise never be replaced and occlusion never engage).
-    if (auto* terrain = orchestrator.getRenderTerrain()) {
-        terrain->prepareDepthTarget(parameters);
-    }
-
+#if defined(__ANDROID__)
+    g_updateLayersMs = (util::MonotonicTimer::now().count() - tUpdateLayersStart) * 1000.0;
+#endif
     // Draped layer groups are not routed into individual render targets here;
     // each drape RenderTarget renders every overlapping draped drawable itself
     // (RenderTarget::renderDrapedLayerGroups), so a tile at a different zoom than
     // the terrain cover is drawn into every target it covers, like gl-js.
+
+    // Per-drape-target content signatures for this frame (see
+    // PaintParameters::perTargetDrapeSignature). Populated in the tweaker pass
+    // below when terrain is active; must outlive the drape targets pass that reads
+    // it, hence the function scope. parameters points into it for the frame.
+    std::map<UnwrappedTileID, std::size_t> perTargetDrapeSignature;
 
     // Upload layer groups
     {
@@ -328,22 +415,128 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
         // Update the debug layer groups
         orchestrator.updateDebugLayerGroups(renderTree, parameters);
 
+        // Compute the frame-global draped-content signature once (see
+        // PaintParameters::drapedContentSignature). It folds every input a terrain
+        // drape's baked content depends on - the ids of all draped drawables, the
+        // draped group count, the zoom, and the property epoch - and is reused both
+        // to gate the draped tweakers here and by the per-target drape short-circuit
+        // later this frame. Computed once, it is O(draped drawables), not per target.
+        const bool terrainActive = orchestrator.getRenderTerrain() != nullptr;
+        bool drapedContentChanged = true;
+        const double tSigStart = util::MonotonicTimer::now().count();
+        if (terrainActive) {
+            const double zoom = parameters.state.getZoom();
+            // Fold only the integer tile-zoom into drape signatures, not the continuous
+            // zoom. A drape tile's rasterized content is stable within a zoom level; a
+            // continuous zoom would change every target's signature on every frame of a
+            // pinch gesture, re-rendering all drape textures each frame (the dominant
+            // render-thread CPU cost). This caches drapes across pan/pitch/zoom-in-level,
+            // re-rendering only when crossing an integer zoom (where tiles change anyway).
+            const int32_t zoomLevel = static_cast<int32_t>(zoom);
+            // NOTE: the paint-property epoch is deliberately NOT folded into the drape
+            // signatures. maplibre-gl-js keys its terrain RTT cache purely on tile
+            // coverage + source data revision, never on paint changes. Folding the
+            // global epoch here invalidated every drape target whenever any paint
+            // transition ran (e.g. a single label fading in), forcing a full re-render
+            // of all drape textures each frame - the dominant GPU cost. A paint change
+            // that actually alters draped geometry rebuilds its drawables (new ids),
+            // which the drawable-id hashes below already capture.
+
+            // Single pass over all draped drawables: fold each into the global signature
+            // (for the tweaker gate) and record its (covering tile, hash) in a flat vector.
+            // A target's own signature is then a linear sum over that vector of the hashes
+            // whose tile overlaps it. This replaces two per-frame std::map accumulators
+            // whose per-drawable ancestor loop did ~20k node allocations every frame
+            // (measured ~2.4ms): the vector allocates once (reserved) and the per-target
+            // sum is just tile-id comparisons - order-independent, no allocations.
+            std::size_t signature = 0;
+            std::size_t drapedGroupCount = 0;
+            std::vector<std::pair<UnwrappedTileID, std::size_t>> drapedTiles;
+            drapedTiles.reserve(1024);
+            orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) {
+                if (layerGroup.getType() != LayerGroupBase::Type::TileLayerGroup ||
+                    !layerGroup.shouldRenderToTerrain()) {
+                    return;
+                }
+                drapedGroupCount++;
+                static_cast<TileLayerGroup&>(layerGroup).visitDrawables([&](const gfx::Drawable& drawable) {
+                    if (!drawable.getEnabled() || !drawable.getTileID()) {
+                        return;
+                    }
+                    // Key on the COVERING TILE id, not the drawable-instance id: drawables
+                    // get fresh ids on every bucket rebuild/fade/reload, which made the
+                    // signature miss every frame during interaction. Consistent with
+                    // RenderTarget::computeDrapeCoverage.
+                    const UnwrappedTileID tile = drawable.getTileID()->toUnwrapped();
+                    std::size_t h = 0;
+                    util::hash_combine(h, tile.wrap);
+                    util::hash_combine(h, tile.canonical.z);
+                    util::hash_combine(h, tile.canonical.x);
+                    util::hash_combine(h, tile.canonical.y);
+                    util::hash_combine(signature, h);
+                    drapedTiles.emplace_back(tile, h);
+                });
+            });
+            util::hash_combine(signature, drapedGroupCount);
+            util::hash_combine(signature, zoomLevel);
+            parameters.drapedContentSignature = signature;
+            drapedContentChanged = (lastDrapedContentSignature != signature);
+            lastDrapedContentSignature = signature;
+
+            // Each drape target's signature: order-independent sum of the hashes of all
+            // draped drawables overlapping it - its own tile, its descendants (isChildOf),
+            // and its ancestors (tid is a child of them) - folded with the group count and
+            // integer zoom. Same content as the old subtree+ancestor map lookups.
+            orchestrator.visitRenderTargets([&](RenderTarget& renderTarget) {
+                const auto& tid = renderTarget.getDrapeTileID();
+                if (!tid) {
+                    return;
+                }
+                std::size_t sig = 0;
+                for (const auto& [tile, h] : drapedTiles) {
+                    if (tile == *tid || tile.isChildOf(*tid) || tid->isChildOf(tile)) {
+                        sig += h;
+                    }
+                }
+                util::hash_combine(sig, drapedGroupCount);
+                util::hash_combine(sig, zoomLevel);
+                perTargetDrapeSignature[*tid] = sig;
+            });
+            parameters.perTargetDrapeSignature = &perTargetDrapeSignature;
+        }
+#if defined(__ANDROID__)
+        g_sigMs = (util::MonotonicTimer::now().count() - tSigStart) * 1000.0;
+#endif
+
         // Tweakers are run in the upload pass so they can set up uniforms.
+        const double tTweakStart = util::MonotonicTimer::now().count();
         parameters.currentLayer = 0;
         orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) {
-            layerGroup.runTweakers(renderTree, parameters);
+            // Skip a draped layer group's tweaker when the drape content is
+            // unchanged: its cached drape texture is not re-rendered this frame,
+            // and drapes are camera-independent (rendered with a tile-local matrix),
+            // so the recomputed per-drawable camera UBOs would go unused. A real
+            // change moves the signature and re-runs the tweaker the same frame the
+            // drape re-renders, keeping the two consistent.
+            const bool skipDrapedTweaker = terrainActive && !drapedContentChanged &&
+                                           layerGroup.shouldRenderToTerrain();
+            if (!skipDrapedTweaker) {
+                layerGroup.runTweakers(renderTree, parameters);
+            }
             parameters.currentLayer++;
         });
 
         // Run terrain tweaker if terrain is enabled
         if (auto* terrain = orchestrator.getRenderTerrain()) {
             if (auto* terrainTweaker = terrain->getTweaker()) {
+                const double start = util::MonotonicTimer::now().count();
                 if (const auto& layerGroup = terrain->getLayerGroup()) {
                     terrainTweaker->execute(*layerGroup, parameters);
                 }
                 if (const auto& depthLayerGroup = terrain->getDepthLayerGroup()) {
                     terrainTweaker->execute(*depthLayerGroup, parameters);
                 }
+                context.renderingStats().terrainTweakerTime = util::MonotonicTimer::now().count() - start;
             }
         }
 
@@ -353,7 +546,12 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
             parameters.currentLayer++;
         });
 
+#if defined(__ANDROID__)
+        g_allTweakMs = (util::MonotonicTimer::now().count() - tTweakStart) * 1000.0;
+#endif
+
         // Give the layers a chance to upload
+        const double tUploadStart = util::MonotonicTimer::now().count();
         orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) { layerGroup.upload(*uploadPass); });
 
         // The terrain depth layer group is deliberately not registered with the
@@ -375,7 +573,15 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
 
         // Upload the Debug layer group
         orchestrator.visitDebugLayerGroups([&](LayerGroupBase& layerGroup) { layerGroup.upload(*uploadPass); });
+#if defined(__ANDROID__)
+        g_uploadMs = (util::MonotonicTimer::now().count() - tUploadStart) * 1000.0;
+        g_beforeScopeEnd = util::MonotonicTimer::now().count();
+#endif
     }
+#if defined(__ANDROID__)
+    g_uploadDtorMs = (util::MonotonicTimer::now().count() - g_beforeScopeEnd) * 1000.0;
+    g_afterUploadMs = (util::MonotonicTimer::now().count() - tBodyStart) * 1000.0;
+#endif
 
     const Size atlasSize = parameters.patternAtlas.getPixelSize();
     const auto& worldSize = parameters.staticData.backendSize;
@@ -452,16 +658,82 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
         // maximum slope (the prepare pass encodes flat as 0.5, not 0), shading the
         // whole tile solid. Draw the producers first, then the drapes that sample
         // them.
+
+        // Per-frame reset for the drape-churn measurement: RenderTarget::render
+        // increments these for each drape it re-renders (a cache miss) and for
+        // each one that runs the full coverage scan (a fast-path miss).
+        context.renderingStats().numDrapeTargetsRendered = 0;
+        context.renderingStats().numDrapeCoverageScans = 0;
+        // parameters.drapedContentSignature was computed once earlier this frame
+        // (before the tweaker pass) and is reused by each target's short-circuit.
+
+        const double tNonDrape = util::MonotonicTimer::now().count();
         orchestrator.visitRenderTargets([&](RenderTarget& renderTarget) {
             if (!renderTarget.getDrapeTileID()) {
                 renderTarget.render(orchestrator, renderTree, parameters);
             }
         });
+#if defined(__ANDROID__)
+        g_nonDrapeMs = (util::MonotonicTimer::now().count() - tNonDrape) * 1000.0;
+        const double tDrapeLoop = util::MonotonicTimer::now().count();
+#endif
+        // Drape render budget: cap how many drape targets actually re-render per frame. A
+        // burst of dirty targets (tilt/pan changing coverage) otherwise stalls one frame for
+        // tens of ms each; instead render up to kMaxDrapeRerendersPerFrame and defer the rest
+        // (they keep their stale texture), requesting a follow-up frame so they catch up
+        // progressively. Never-rendered targets always render (avoid blank tiles).
+        constexpr int kMaxDrapeRerendersPerFrame = 4;
+        int drapeBudget = kMaxDrapeRerendersPerFrame;
         orchestrator.visitRenderTargets([&](RenderTarget& renderTarget) {
             if (renderTarget.getDrapeTileID()) {
-                renderTarget.render(orchestrator, renderTree, parameters);
+                const auto res = renderTarget.render(
+                    orchestrator, renderTree, parameters, /*canRerender=*/drapeBudget > 0);
+                if (res == RenderTarget::RenderResult::Rendered) {
+                    --drapeBudget;
+                } else if (res == RenderTarget::RenderResult::Deferred) {
+                    drapeWorkDeferred = true;
+                }
             }
         });
+#if defined(__ANDROID__)
+        g_drapeLoopMs = (util::MonotonicTimer::now().count() - tDrapeLoop) * 1000.0;
+#endif
+
+        // TEMP diagnostic: per-frame drape hit ratio. The per-target DRAPE-REDRAW log
+        // only shows misses (cache hits are silent), so it cannot reveal the hit rate.
+        // This prints rendered/total so we can see if the cache holds during movement.
+        // Test protocol: pan back and forth over the SAME small area so tiles are cached
+        // (no streaming) - then rendered should drop to ~0-2, not equal total.
+        {
+            uint32_t totalDrapeTargets = 0;
+            orchestrator.visitRenderTargets([&](RenderTarget& rt) {
+                if (rt.getDrapeTileID()) totalDrapeTargets++;
+            });
+            static uint32_t drapeFrameThrottle = 0;
+            if (++drapeFrameThrottle % 15 == 1) {
+#if defined(__ANDROID__)
+                const auto& s = context.renderingStats();
+                __android_log_print(ANDROID_LOG_ERROR,
+                                    "DRAPE",
+                                    "FRAME rendered=%u/%u repaint=%d | preRender=%.1f front=%.1f "
+                                    "updateLayers=%.1f upload2=%.1f depth=%.1f opaque=%.1f translucent=%.1f "
+                                    "present=%.1f encode=%.1f draws=%u",
+                                    static_cast<unsigned>(s.numDrapeTargetsRendered),
+                                    totalDrapeTargets,
+                                    static_cast<int>(renderTree.getParameters().needsRepaint),
+                                    g_preRenderMs,
+                                    (util::MonotonicTimer::now().count() - tBodyStart) * 1000.0,
+                                    g_updateLayersMs,
+                                    g_uploadMs,
+                                    s.terrainDepthTime * 1000.0,
+                                    g_opaqueMs,
+                                    g_translucentMs,
+                                    s.renderingTime * 1000.0,
+                                    s.encodingTime * 1000.0,
+                                    static_cast<unsigned>(s.numDrawCalls));
+#endif
+            }
+        }
     };
 
     const auto commonClearPass = [&] {
@@ -552,19 +824,33 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
         }
     };
 
+    const double t3dStart = util::MonotonicTimer::now().count();
     if (parameters.staticData.has3D) {
         common3DPass();
         drawable3DPass();
     }
+#if defined(__ANDROID__)
+    g_pass3dMs = (util::MonotonicTimer::now().count() - t3dStart) * 1000.0;
+#endif
     drawableTargetsPass();
     // Terrain depth pass for symbol occlusion (sampled by calculate_visibility)
     if (auto* terrain = orchestrator.getRenderTerrain()) {
+        const double start = util::MonotonicTimer::now().count();
         terrain->renderDepth(orchestrator, renderTree, parameters);
+        context.renderingStats().terrainDepthTime = util::MonotonicTimer::now().count() - start;
     }
     commonClearPass();
     context.bindGlobalUniformBuffers(*parameters.renderPass);
+    const double tOpaqueStart = util::MonotonicTimer::now().count();
     drawableOpaquePass();
+#if defined(__ANDROID__)
+    g_opaqueMs = (util::MonotonicTimer::now().count() - tOpaqueStart) * 1000.0;
+    const double tTranslucentStart = util::MonotonicTimer::now().count();
+#endif
     drawableTranslucentPass();
+#if defined(__ANDROID__)
+    g_translucentMs = (util::MonotonicTimer::now().count() - tTranslucentStart) * 1000.0;
+#endif
     drawableDebugOverlays();
 
     // Give the layers a chance to do cleanup
@@ -597,9 +883,37 @@ void Renderer::Impl::render(const RenderTree& renderTree, const std::shared_ptr<
 
     context.renderingStats().encodingTime = renderTree.getElapsedTime() - context.renderingStats().renderingTime;
 
+#if defined(__ANDROID__)
+    // TEMP: LOD signal - draws this frame + number of terrain drape targets (one per terrain
+    // tile). Distance LOD should drop the drape-target count (fewer distant tiles) at the same
+    // tilted view, independent of gesture; draws should fall with it. Throttled.
+    {
+        // Fetch every frame (resets) so the logged value is this frame's count, not a sum.
+        uint32_t drapeRendered = 0, drapeSkipped = 0;
+        fetchDrapeStats(drapeRendered, drapeSkipped);
+        static uint32_t lodThrottle = 0;
+        if (++lodThrottle % 30 == 1) {
+            uint32_t drapeTargets = 0;
+            orchestrator.visitRenderTargets([&](RenderTarget& rt) {
+                if (rt.getDrapeTileID()) ++drapeTargets;
+            });
+            __android_log_print(ANDROID_LOG_ERROR,
+                                "LODCNT",
+                                "draws=%d drapeTargets=%u drapeRendered=%u drapeSkipped=%u",
+                                context.renderingStats().numDrawCalls,
+                                drapeTargets,
+                                drapeRendered,
+                                drapeSkipped);
+        }
+    }
+#endif
+
     observer->onDidFinishRenderingFrame(
         renderTreeParameters.loaded ? RendererObserver::RenderMode::Full : RendererObserver::RenderMode::Partial,
-        renderTreeParameters.needsRepaint,
+        // Request a follow-up frame if the drape budget deferred any target or the tile-build
+        // budget deferred any new tile, so deferred drapes/tiles catch up progressively even
+        // after the interaction stops.
+        renderTreeParameters.needsRepaint || drapeWorkDeferred || context.newTileBuildWasDeferred(),
         renderTreeParameters.placementChanged,
         context.threadSafeCopyRenderingStats());
 

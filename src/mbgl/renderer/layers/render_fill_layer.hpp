@@ -36,6 +36,10 @@ public:
                 const RenderTree&,
                 UniqueChangeRequestVec&) override;
 
+    // Fill layers do only drawable bookkeeping in update(); safe to gate when the tile
+    // content is unchanged (no placement, camera handled by the tweaker pass).
+    bool supportsUpdateGating() const noexcept override { return true; }
+
 private:
     void transition(const TransitionParameters&) override;
     void evaluate(const PropertyEvaluationParameters&) override;

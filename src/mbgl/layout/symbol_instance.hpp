@@ -9,7 +9,15 @@
 #include <cstdint>
 
 #ifndef MLN_SYMBOL_GUARDS
+// Symbol guards are a memory-corruption detection harness: 28 sentinel fields
+// (+224 bytes) per SymbolInstance plus per-symbol verification during placement
+// and cross-tile indexing. Measured ~1% of the render thread + cache bloat, so
+// keep them only in debug builds and drop them when NDEBUG is set.
+#if defined(NDEBUG)
+#define MLN_SYMBOL_GUARDS 0
+#else
 #define MLN_SYMBOL_GUARDS 1
+#endif
 #endif
 
 #if MLN_SYMBOL_GUARDS

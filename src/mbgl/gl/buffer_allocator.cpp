@@ -12,6 +12,15 @@ using namespace platform;
 
 namespace gl {
 
+// EXT_buffer_storage bits and entry point. MapLibre uses a hand-rolled GL header without
+// gl2ext, so these are declared locally; the function pointer is loaded at context init
+// via eglGetProcAddress and handed to the allocator through setPersistentMapping().
+using PFNGLBUFFERSTORAGEEXT = void (*)(GLenum target, GLsizeiptr size, const void* data, GLbitfield flags);
+constexpr GLbitfield kMapWriteBit = 0x0002;             // GL_MAP_WRITE_BIT
+constexpr GLbitfield kMapPersistentBitEXT = 0x0040;     // GL_MAP_PERSISTENT_BIT_EXT
+constexpr GLbitfield kMapCoherentBitEXT = 0x0080;       // GL_MAP_COHERENT_BIT_EXT
+constexpr GLbitfield kPersistentFlags = kMapWriteBit | kMapPersistentBitEXT | kMapCoherentBitEXT;
+
 /// @brief BufferAllocator is a semi-generic allocation strategy for uniform buffer objects.
 /// This allocator works by streaming buffer writes into sub-allocated sections of actual UBOs.
 /// As UBOs fill up, they are marked 'in-flight' and placed in a waiting area for references to
@@ -74,6 +83,9 @@ public:
         // Backing GL object for this buffer
         GLuint id = 0;
 
+        // Persistent mapping of the whole page (EXT_buffer_storage); null on the map/unmap path.
+        void* mapped = nullptr;
+
         // Tombstones indicating a removed ref. When a Ref is removed, a tombstone is added to this
         // counter. This is much faster vs. erasing from our vector. This works because we enforce
         // a monotonic allocation scheme on our buffers and recycle the whole buffer at once.
@@ -94,11 +106,23 @@ public:
             refs.reserve(InitialBufferSize);
             MBGL_CHECK_ERROR(glGenBuffers(1, &id));
             MBGL_CHECK_ERROR(glBindBuffer(type, id));
-            MBGL_CHECK_ERROR(glBufferData(type, PageSize, nullptr, GL_DYNAMIC_DRAW));
+            if (allocator.bufferStorageEXT) {
+                // Immutable persistent-coherent storage, mapped once for the buffer's lifetime.
+                allocator.bufferStorageEXT(type, static_cast<GLsizeiptr>(PageSize), nullptr, kPersistentFlags);
+                mapped = MBGL_CHECK_ERROR(glMapBufferRange(type, 0, PageSize, kPersistentFlags));
+                assert(mapped);
+            } else {
+                MBGL_CHECK_ERROR(glBufferData(type, PageSize, nullptr, GL_DYNAMIC_DRAW));
+            }
         }
 
         ~Buffer() {
             if (id != 0) {
+                if (mapped) {
+                    glBindBuffer(type, id);
+                    glUnmapBuffer(type);
+                    mapped = nullptr;
+                }
                 glDeleteBuffers(1, &id);
                 id = 0;
             }
@@ -109,6 +133,11 @@ public:
             refs = decltype(refs)();
 
             if (id != 0) {
+                if (mapped) {
+                    glBindBuffer(type, id);
+                    glUnmapBuffer(type);
+                    mapped = nullptr;
+                }
                 glDeleteBuffers(1, &id);
                 id = 0;
             }
@@ -120,10 +149,12 @@ public:
               pointer(rhs.pointer),
               refs(std::move(rhs.refs)),
               id(rhs.id),
+              mapped(rhs.mapped),
               tombstones(rhs.tombstones),
               occupancyBytes(rhs.occupancyBytes),
               bufferIndex(rhs.bufferIndex) {
             rhs.id = 0;
+            rhs.mapped = nullptr;
         }
 
         Buffer& operator=(const Buffer&) = delete;
@@ -133,6 +164,8 @@ public:
             refs = std::move(rhs.refs);
             id = rhs.id;
             rhs.id = 0;
+            mapped = rhs.mapped;
+            rhs.mapped = nullptr;
             tombstones = rhs.tombstones;
             occupancyBytes = rhs.occupancyBytes;
             bufferIndex = rhs.bufferIndex;
@@ -260,30 +293,41 @@ public:
             assert(0);
             return false;
         }
-        MBGL_CHECK_ERROR(glBindBuffer(type, buffer->id));
-
-        // Map the next available slice of memory
-        auto* buf = MBGL_CHECK_ERROR(
-            glMapBufferRange(type,
-                             buffer->pointer,
-                             alignedSize,
-                             GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_WRITE_BIT));
         const auto writtenIndex = buffer->pointer;
 
-        if (buf) {
-            std::memcpy(buf, data, size);
-            MBGL_CHECK_ERROR(glUnmapBuffer(type));
-
+        if (buffer->mapped) {
+            // Persistent-coherent page: write straight into the mapped pointer. No bind, no
+            // map/unmap round trip; the coherent bit makes the write visible to the GPU. The
+            // fence-gated recycle (getFreeBuffer / waitingFree) ensures a page is not reused
+            // until the GPU has finished reading it, so overwriting here is safe.
+            std::memcpy(static_cast<char*>(buffer->mapped) + writtenIndex, data, size);
             residentBuffer = buffer->addRef(nullptr, writtenIndex, size);
             buffer->pointer += alignedSize;
         } else {
-            assert(0);
-            return false;
-        }
+            MBGL_CHECK_ERROR(glBindBuffer(type, buffer->id));
+
+            // Map the next available slice of memory
+            auto* buf = MBGL_CHECK_ERROR(
+                glMapBufferRange(type,
+                                 buffer->pointer,
+                                 alignedSize,
+                                 GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_WRITE_BIT));
+
+            if (buf) {
+                std::memcpy(buf, data, size);
+                MBGL_CHECK_ERROR(glUnmapBuffer(type));
+
+                residentBuffer = buffer->addRef(nullptr, writtenIndex, size);
+                buffer->pointer += alignedSize;
+            } else {
+                assert(0);
+                return false;
+            }
 
 #ifndef NDEBUG
-        MBGL_CHECK_ERROR(glBindBuffer(type, 0));
+            MBGL_CHECK_ERROR(glBindBuffer(type, 0));
 #endif
+        }
 
         return true;
     }
@@ -436,19 +480,26 @@ private:
         auto& destBuffer = buffers[toIndex];
         const auto recycledWriteIndex = destBuffer.pointer;
 
-        auto* buf = MBGL_CHECK_ERROR(
-            glMapBufferRange(type,
-                             recycledWriteIndex,
-                             alignedSize,
-                             GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_WRITE_BIT));
-
-        if (buf) {
-            std::memcpy(buf, ref.getOwner()->getManagedBuffer().getContents().data(), ref.getOwner()->getSize());
-            MBGL_CHECK_ERROR(glUnmapBuffer(type));
+        if (destBuffer.mapped) {
+            std::memcpy(static_cast<char*>(destBuffer.mapped) + recycledWriteIndex,
+                        ref.getOwner()->getManagedBuffer().getContents().data(),
+                        ref.getOwner()->getSize());
             destBuffer.pointer += alignedSize;
         } else {
-            assert(0);
-            return false;
+            auto* buf = MBGL_CHECK_ERROR(
+                glMapBufferRange(type,
+                                 recycledWriteIndex,
+                                 alignedSize,
+                                 GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_WRITE_BIT));
+
+            if (buf) {
+                std::memcpy(buf, ref.getOwner()->getManagedBuffer().getContents().data(), ref.getOwner()->getSize());
+                MBGL_CHECK_ERROR(glUnmapBuffer(type));
+                destBuffer.pointer += alignedSize;
+            } else {
+                assert(0);
+                return false;
+            }
         }
 
         // 2.c: Now the ref must be made aware of the relocation of its contents.
@@ -486,6 +537,10 @@ public:
     // All buffers allocated so far
     std::vector<Buffer> buffers;
 
+    // glBufferStorageEXT entry point; when non-null, pages use persistent-coherent mapping
+    // and writes are a plain memcpy into the mapped pointer (no per-write map/unmap).
+    PFNGLBUFFERSTORAGEEXT bufferStorageEXT = nullptr;
+
     friend Buffer;
 };
 
@@ -515,6 +570,11 @@ size_t UniformBufferAllocator::pageSize() const noexcept {
 
 int32_t UniformBufferAllocator::getBufferID(size_t bufferIndex) const noexcept {
     return impl->getBufferID(bufferIndex);
+}
+
+void UniformBufferAllocator::setPersistentMapping(void* bufferStorageProc) noexcept {
+    // Only affects pages created after this point; call before any UBO is allocated.
+    impl->bufferStorageEXT = reinterpret_cast<PFNGLBUFFERSTORAGEEXT>(bufferStorageProc);
 }
 
 } // namespace gl

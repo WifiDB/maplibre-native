@@ -4,7 +4,7 @@
 #include <type_traits>
 
 #ifdef __ANDROID__
-#include <android/log.h>
+#include <android/log.h> // __android_log_assert (OOM dump persists in tombstone)
 #endif
 
 #include <mbgl/gl/context.hpp>
