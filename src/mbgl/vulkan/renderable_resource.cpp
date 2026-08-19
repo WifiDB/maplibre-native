@@ -115,12 +115,12 @@ void SurfaceRenderableResource::initSwapchain(uint32_t w, uint32_t h) {
         // update values based on surface limits
         extent.width = std::min(std::max(w, capabilities.minImageExtent.width), capabilities.maxImageExtent.width);
         extent.height = std::min(std::max(h, capabilities.minImageExtent.height), capabilities.maxImageExtent.height);
+    }
 
-        if (hasSurfaceTransformSupport()) {
-            if (capabilities.currentTransform & vk::SurfaceTransformFlagBitsKHR::eRotate90 ||
-                capabilities.currentTransform & vk::SurfaceTransformFlagBitsKHR::eRotate270) {
-                std::swap(extent.width, extent.height);
-            }
+    if (hasSurfaceTransformSupport()) {
+        if (capabilities.currentTransform & vk::SurfaceTransformFlagBitsKHR::eRotate90 ||
+            capabilities.currentTransform & vk::SurfaceTransformFlagBitsKHR::eRotate270) {
+            std::swap(extent.width, extent.height);
         }
     }
 
@@ -173,15 +173,20 @@ void SurfaceRenderableResource::initSwapchain(uint32_t w, uint32_t h) {
     setColorFormat(swapchainCreateInfo.imageFormat);
     extent = swapchainCreateInfo.imageExtent;
 
-    acquireSemaphores.reserve(swapchainImages.size());
+    acquireSemaphores.reserve(backend.getMaxFrames());
+    for (uint32_t index = 0; index < backend.getMaxFrames(); ++index) {
+        acquireSemaphores.emplace_back(device->createSemaphoreUnique({}, nullptr, dispatcher));
+
+        const auto indexStr = std::to_string(index);
+        backend.setDebugName(acquireSemaphores.back().get(), "AcquireSemaphore_" + indexStr);
+    }
+
     presentSemaphores.reserve(swapchainImages.size());
     for (uint32_t index = 0; index < swapchainImages.size(); ++index) {
-        acquireSemaphores.emplace_back(device->createSemaphoreUnique({}, nullptr, dispatcher));
         presentSemaphores.emplace_back(device->createSemaphoreUnique({}, nullptr, dispatcher));
 
         const auto indexStr = std::to_string(index);
-        backend.setDebugName(acquireSemaphores.back().get(), "PresentSemaphore_" + indexStr);
-        backend.setDebugName(presentSemaphores.back().get(), "AcquireSemaphore_" + indexStr);
+        backend.setDebugName(presentSemaphores.back().get(), "PresentSemaphore_" + indexStr);
     }
 }
 
